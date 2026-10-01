@@ -1,0 +1,25 @@
+回傳單一合法 JSON 物件。所有欄位必填；沒有項目時使用 []，沒有日期用 ""。不可新增欄位。
+以下是結構示例，內容只是格式占位，請改成實際內容：
+{
+  "title": "中性知識稿標題",
+  "body": "主題一 [P001]\n完整描述性段落。",
+  "metadata": {
+    "eventDate": "",
+    "contentType": "研習逐字稿整理",
+    "topics": ["主題"],
+    "summary": "整體內容摘要",
+    "limitations": ["缺少圖表等必要限制；無限制時使用空陣列"]
+  },
+  "omissions": [
+    {"id": "O001", "sourceIds": ["P002"], "text": "被完全捨棄且已去識別的內容", "reason": "捨棄原因"}
+  ],
+  "questions": [
+    {"id": "Q001", "sourceIds": ["P003"], "question": "請提供者確認的問題", "context": "說明疑點，不能洩漏身分"}
+  ],
+  "coverage": [
+    {"sourceId": "P001", "status": "retained", "target": "主題一"},
+    {"sourceId": "P002", "status": "omitted", "target": "O001"},
+    {"sourceId": "P003", "status": "pending", "target": "Q001"}
+  ]
+}
+metadata 不得有 hostOrganization、participantRoles 或 speakers。來源 ID 必須來自輸入；不得捏造。coverage 必須涵蓋全部來源，每個 sourceId 恰好一次。omissions 與 questions 的 id 各自唯一。

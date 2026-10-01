@@ -1,0 +1,12 @@
+node_modules/
+.env
+.env.*
+!.env.example
+*service-account*.json
+*credentials*.json
+*.pem
+*.key
+*.log
+coverage/
+work/
+private/

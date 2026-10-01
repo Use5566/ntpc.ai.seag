@@ -1,0 +1,16 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {redact,segmentsFrom,parseResult,secretLike,privacyIssues,applyAnswers,exportText,validDate} from './core.js';
+import {DEMO_SOURCE,DEMO_RESULT} from './demo.js';
+const seg=segmentsFrom(DEMO_SOURCE);
+const copy=()=>structuredClone(DEMO_RESULT);
+test('示範完整涵蓋來源，允許 JSON code fence',()=>{assert.equal(seg.length,5);assert.equal(parseResult('```json\n'+JSON.stringify(copy())+'\n```',seg).coverage.length,5);});
+test('遺漏、重複、捏造段落都拒絕',()=>{for(const mutate of [r=>r.coverage.pop(),r=>r.coverage.push(r.coverage[0]),r=>r.coverage[0].sourceId='P099']){const r=copy();mutate(r);assert.throws(()=>parseResult(JSON.stringify(r),seg));}});
+test('身分欄位及遮蔽詞彙拒絕入稿',()=>{const r=copy();r.metadata.hostOrganization='任何單位';assert.throws(()=>parseResult(JSON.stringify(r),seg));assert.throws(()=>parseResult(JSON.stringify(copy()),seg,['種子']));});
+test('去識別不破壞教材年級，移除獨立角色和明確欄位',()=>{assert.equal(redact('主辦單位：測試單位\n\n3年級教師 00:01:00\n三年級教材需要調整。',['測試單位']),'[已移除識別欄位]\n\n00:01:00\n三年級教材需要調整。');assert.ok(!redact('講師、3年級教師、4年級教師\n\n正文').includes('教師'));assert.ok(!redact('虛構單位提出建議',['虛構單位']).includes('虛構單位'));});
+test('捨棄狀態必須實際對應捨棄項目',()=>{const r=copy();r.omissions=[];assert.throws(()=>parseResult(JSON.stringify(r),seg));});
+test('問題與來源 ID 不可為空或無效',()=>{const r=copy();r.questions[0].sourceIds=[];assert.throws(()=>parseResult(JSON.stringify(r),seg));});
+test('不接受錯誤日期與過大結果',()=>{assert.equal(validDate('2025-02-30'),false);const r=copy();r.metadata.eventDate='2025-02-30';assert.throws(()=>parseResult(JSON.stringify(r),seg));assert.throws(()=>parseResult('x'.repeat(1500001),seg));});
+test('補充需文字，無法確認可完成但保留限制',()=>{assert.throws(()=>applyAnswers(copy(),{}));assert.throws(()=>applyAnswers(copy(),{Q001:{action:'correct',text:''}}));const r=applyAnswers(copy(),{Q001:{action:'unknown',text:''}});assert.equal(r.questions.length,0);assert.match(r.body,/不是逐字稿原話/);assert.ok(r.metadata.limitations.some(x=>x.includes('待釐清')));assert.equal(parseResult(JSON.stringify(r),seg).coverage.length,5);});
+test('正式稿不包含未恢復的捨棄內容',()=>{const r=applyAnswers(copy(),{Q001:{action:'unknown',text:''}});const txt=exportText(r,seg.length,'test');assert.ok(!txt.includes('測試一下麥克風'));assert.ok(txt.includes('主題整理正文'));});
+test('可疑金鑰防止誤貼及匯出',()=>{assert.equal(secretLike('sk-'+ 'a'.repeat(30)),true);assert.equal(secretLike('正常教學內容'),false);assert.ok(privacyIssues('hostOrganization: X').length>0);});
