@@ -4,8 +4,8 @@ import {createHash,timingSafeEqual} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import {MAX_CHARS,parseResult,secretLike,applyAnswers} from './core.js';
 
-class HttpError extends Error { constructor(status,message){super(message);this.status=status;} }
-const fail=(status,message)=>{throw new HttpError(status,message);};
+class HttpError extends Error { constructor(status,message,code='REQUEST_FAILED'){super(message);this.status=status;this.code=code;} }
+const fail=(status,message,code)=>{throw new HttpError(status,message,code);};
 const digest=value=>createHash('sha256').update(value).digest();
 const plain=x=>x&&typeof x==='object'&&!Array.isArray(x);
 export function validateInput(data){
@@ -66,17 +66,17 @@ export async function createApp({env=process.env,fetchImpl=fetch,now=Date.now}={
           body:JSON.stringify({systemInstruction:{parts:[{text:[prompts.system,prompts[input.mode],prompts['output-schema']].join('\n\n')}]},contents:[{role:'user',parts:[{text:serialized}]}],generationConfig:{responseMimeType:'application/json',maxOutputTokens:32768}})
         });
         // Never return or log raw upstream errors, request headers, prompts, or transcripts.
-        if(!response.ok){await response.body?.cancel();fail(response.status===429?429:502,response.status===429?'Gemini 額度或速率已達上限，請稍後再試。':'Gemini 呼叫失敗，請管理者檢查金鑰、模型權限與服務狀態。');}
+        if(!response.ok){await response.body?.cancel();const code=({400:'UPSTREAM_REQUEST',401:'UPSTREAM_AUTH',403:'UPSTREAM_AUTH',404:'MODEL_UNAVAILABLE',429:'UPSTREAM_QUOTA'})[response.status]||'UPSTREAM_SERVICE';fail(response.status===429?429:502,'Gemini 呼叫失敗。',code);}
         const chunks=[];let size=0;for await(const chunk of response.body){size+=chunk.length;if(size>6000000)fail(502,'AI 回應過大，請縮短逐字稿。');chunks.push(chunk);}const raw=Buffer.concat(chunks).toString('utf8');
         let payload;try{payload=JSON.parse(raw);}catch{fail(502,'AI 回應格式不正確。');}
         const candidate=payload.candidates?.[0];
-        if(candidate?.finishReason!=='STOP')fail(502,'AI 未完整產生結果，請縮短逐字稿後再試。');
+        if(candidate?.finishReason!=='STOP')fail(502,'AI 未完整產生結果，請縮短逐字稿後再試。','RESULT_INCOMPLETE');
         const output=(candidate.content?.parts||[]).filter(p=>!p.thought).map(p=>p.text||'').join('');
         if(output.includes(key)||output.includes(token))fail(502,'AI 回應未通過安全檢查。');
-        let result;try{if(!Array.isArray(JSON.parse(output).privacyCandidates))throw Error();result=parseResult(output,input.source);}catch{fail(502,'AI 結果未通過格式、來源完整性或去識別檢查。原稿仍保留，請稍後重試或拆分內容。');}
+        let result;try{if(!Array.isArray(JSON.parse(output).privacyCandidates))throw Error();result=parseResult(output,input.source);}catch{fail(502,'AI 結果未通過格式、來源完整性或去識別檢查。原稿仍保留，請稍後重試或拆分內容。','RESULT_INVALID');}
         send(200,{result});
       }finally{clearTimeout(timer);res.off('close',disconnect);busy=false;}
-    }catch(error){send(error instanceof HttpError?error.status:503,{error:error instanceof HttpError?error.message:'服務暫時無法完成或已逾時，原稿仍保留，請稍後重試。'});}
+    }catch(error){send(error instanceof HttpError?error.status:503,{error:error instanceof HttpError?error.message:'服務暫時無法完成或已逾時，原稿仍保留，請稍後重試。',code:error instanceof HttpError?error.code:'SERVICE_TIMEOUT'});}
   });
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
