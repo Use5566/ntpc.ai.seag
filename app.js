@@ -1,5 +1,5 @@
-import {MAX_CHARS,normalize,termsFrom,redact,segmentsFrom,privacyIssues,secretLike,parseResult,applyAnswers,exportText,STATUS_LABELS,validDate,resolvePrivacy} from './core.js';
-import {API_BASE} from './api-config.js';
+import {MAX_CHARS,normalize,termsFrom,redact,segmentsFrom,privacyIssues,secretLike,parseResult,applyAnswers,exportText,STATUS_LABELS,validDate,resolvePrivacy} from './core.js?v=0.3.2';
+import {API_BASE} from './api-config.js?v=0.3.2';
 
 const $=id=>document.getElementById(id);
 const state={step:0,maxStep:0,segments:[],result:null,terms:[],answers:{},history:[],dirty:false,taskKey:'',prompts:null};
@@ -122,3 +122,5 @@ bind('apply-privacy','click',()=>{
  $('source-text').value=$('safe-source').value;$('source-title').value=state.result.title;$('hint-date').value=state.result.metadata.eventDate;$('hint-type').value=state.result.metadata.contentType;$('hint-topics').value=state.result.metadata.topics.join('、');$('hint-context').value='';
  dirty();renderResult();setTab('draft');message('已將決定套用到來源、正文與 metadata。請繼續核對待確認問題及有無遺漏。',true);
 });
+
+window.addEventListener('pageshow',()=>{if(state.step===0){const n=$('source-text').value.length;$('source-count').textContent=`${n.toLocaleString()} 字元`;$('to-privacy').disabled=!$('source-text').value.trim()||n>MAX_CHARS;}});

@@ -42,7 +42,7 @@ export async function createApp({env=process.env,fetchImpl=fetch,now=Date.now}={
     const send=(status,obj)=>{if(!res.destroyed){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(obj));}};
     res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Vary','Origin');
     try{
-      if(req.url==='/health'&&req.method==='GET'){send(200,{ok:true});return;}
+      if(req.url==='/health'&&req.method==='GET'){send(200,{ok:true,version:'0.3.2'});return;}
       if(req.url!=='/api/organize')fail(404,'找不到此端點。');
       if(req.headers.origin!==origin)fail(403,'不允許此網站來源。');
       res.setHeader('Access-Control-Allow-Origin',origin);
