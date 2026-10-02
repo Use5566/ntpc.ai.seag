@@ -36,7 +36,17 @@ export function parseResult(input, segments, terms=[]) {
   if(typeof input!=='string'||input.length>1500000) fail('AI 結果過大或格式不正確。');
   let parsed;
   try { parsed=JSON.parse(input.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'')); } catch { fail('無法讀取 JSON。請貼上完整結果，並檢查引號與逗號。'); }
-  shape(parsed,['title','body','metadata','omissions','questions','coverage'],'整理結果');
+  // Older manually imported work files may not contain privacy suggestions.
+  if(parsed && !Object.hasOwn(parsed,'privacyCandidates'))parsed.privacyCandidates=[];
+  shape(parsed,['title','body','metadata','omissions','questions','coverage','privacyCandidates'],'整理結果');
+  array(parsed.privacyCandidates,'privacyCandidates',300);
+  const privacyIds=new Set();
+  for(const item of parsed.privacyCandidates){
+    shape(item,['id','sourceIds','text','replacement','reason'],'去識別建議');
+    if(!/^D[0-9]{3,}$/.test(item.id)||privacyIds.has(item.id)||item.replacement!==`[識別${item.id}]`)fail('去識別建議 ID 或代稱不正確。');
+    privacyIds.add(item.id);string(item.text,'待確認文字',true);string(item.reason,'建議原因',true);array(item.sourceIds,'來源 ID');
+    if(!item.sourceIds.length||item.sourceIds.some(id=>!segments.some(s=>s.id===id&&s.text.includes(item.text))))fail('去識別建議必須對應來源中的原文。');
+  }
   string(parsed.title,'title',true); string(parsed.body,'body',true);
   if(parsed.title.length>180) fail('標題請限制在 180 字元內。');
   shape(parsed.metadata,['eventDate','contentType','topics','summary','limitations'],'metadata');
@@ -73,6 +83,17 @@ export function parseResult(input, segments, terms=[]) {
   return parsed;
 }
 export const STATUS_LABELS={retained:'保留',merged:'合併轉譯',omitted:'完全捨棄',pending:'待確認'};
+export function resolvePrivacy(result,segments,decisions){
+  const candidates=result.privacyCandidates||[];
+  if(candidates.some(c=>!['redact','keep'].includes(decisions[c.id])))fail('請逐項決定遮蔽或保留。');
+  // Reject ambiguous overlapping decisions rather than silently applying a partial mask.
+  for(const a of candidates)for(const b of candidates)if(a.id!==b.id&&(a.text.includes(b.text)||b.text.includes(a.text))&&decisions[a.id]!==decisions[b.id])fail('重疊文字的決定不同，請選擇一致的處理方式。');
+  const ordered=[...candidates].sort((a,b)=>b.text.length-a.text.length);
+  const transform=text=>{let out=text;for(const c of ordered){if(decisions[c.id]==='redact')out=out.split(c.text).join(c.replacement);else out=out.split(c.replacement).join(c.text);}return out;};
+  const walk=value=>typeof value==='string'?transform(value):Array.isArray(value)?value.map(walk):value&&typeof value==='object'?Object.fromEntries(Object.entries(value).map(([k,v])=>[k,walk(v)])):value;
+  const next=walk({...result,privacyCandidates:[]});
+  return {result:next,segments:segments.map(s=>({...s,text:transform(s.text)}))};
+}
 export function applyAnswers(result, answers) {
   const clone=structuredClone(result);
   const sections=[];

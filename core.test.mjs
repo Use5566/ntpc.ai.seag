@@ -1,9 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {redact,segmentsFrom,parseResult,secretLike,privacyIssues,applyAnswers,exportText,validDate} from './core.js';
+import {redact,segmentsFrom,parseResult,secretLike,privacyIssues,applyAnswers,exportText,validDate,resolvePrivacy} from './core.js';
 // Minimal fixtures used only by the test runner, never loaded by the app.
 const seg=segmentsFrom('設備準備。\n\n種子觀察。\n\n記錄日期。\n\n評量設計。\n\n版本待確認。');
 const copy=()=>({title:'測試稿',body:'種子觀察與評量 [P002, P003, P004]',metadata:{eventDate:'',contentType:'整理稿',topics:[],summary:'',limitations:[]},omissions:[{id:'O001',sourceIds:['P001'],text:'設備準備。',reason:'非主題內容'}],questions:[{id:'Q001',sourceIds:['P005'],question:'請確認版本。',context:'來源不明。'}],coverage:[{sourceId:'P001',status:'omitted',target:'O001'},{sourceId:'P002',status:'retained',target:'主題一'},{sourceId:'P003',status:'merged',target:'主題一'},{sourceId:'P004',status:'retained',target:'主題一'},{sourceId:'P005',status:'pending',target:'Q001'}]});
+test('遮蔽同步修改來源與各欄位，未決定不得套用',()=>{const r=copy();r.privacyCandidates=[{id:'D001',sourceIds:['P002'],text:'種子',replacement:'[識別D001]',reason:'測試候選'}];r.metadata.summary='種子';assert.throws(()=>resolvePrivacy(r,seg,{}));const resolved=resolvePrivacy(r,seg,{D001:'redact'});assert.ok(!JSON.stringify(resolved).includes('種子'));assert.equal(resolved.result.privacyCandidates.length,0);assert.ok(resolved.segments[1].text.includes('[識別D001]'));});
+test('保留決定還原 AI 暫用代稱',()=>{const r=copy();r.privacyCandidates=[{id:'D001',sourceIds:['P002'],text:'種子',replacement:'[識別D001]',reason:'測試候選'}];r.body='[識別D001]觀察';assert.equal(resolvePrivacy(r,seg,{D001:'keep'}).result.body,'種子觀察');});
+test('去識別建議不得捏造來源原文',()=>{const r=copy();r.privacyCandidates=[{id:'D001',sourceIds:['P002'],text:'不存在',replacement:'[識別D001]',reason:'測試候選'}];assert.throws(()=>parseResult(JSON.stringify(r),seg));});
 test('整理結果完整涵蓋來源，允許 JSON code fence',()=>{assert.equal(seg.length,5);assert.equal(parseResult('```json\n'+JSON.stringify(copy())+'\n```',seg).coverage.length,5);});
 test('遺漏、重複、捏造段落都拒絕',()=>{for(const mutate of [r=>r.coverage.pop(),r=>r.coverage.push(r.coverage[0]),r=>r.coverage[0].sourceId='P099']){const r=copy();mutate(r);assert.throws(()=>parseResult(JSON.stringify(r),seg));}});
 test('身分欄位及遮蔽詞彙拒絕入稿',()=>{const r=copy();r.metadata.hostOrganization='任何單位';assert.throws(()=>parseResult(JSON.stringify(r),seg));assert.throws(()=>parseResult(JSON.stringify(copy()),seg,['種子']));});

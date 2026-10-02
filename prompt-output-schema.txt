@@ -16,6 +16,7 @@
   "questions": [
     {"id": "Q001", "sourceIds": ["P003"], "question": "請提供者確認的問題", "context": "說明疑點，不能洩漏身分"}
   ],
+  "privacyCandidates": [],
   "coverage": [
     {"sourceId": "P001", "status": "retained", "target": "主題一"},
     {"sourceId": "P002", "status": "omitted", "target": "O001"},
@@ -23,3 +24,5 @@
   ]
 }
 metadata 不得有 hostOrganization、participantRoles 或 speakers。來源 ID 必須來自輸入；不得捏造。coverage 必須涵蓋全部來源，每個 sourceId 恰好一次。omissions 與 questions 的 id 各自唯一。
+
+privacyCandidates 為必填陣列。每項格式：{"id":"D001","sourceIds":["P001"],"text":"來源中的精確識別文字","replacement":"[識別D001]","reason":"可能識別單位或個人的原因"}。沒有候選用 []。

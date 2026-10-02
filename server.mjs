@@ -1,0 +1,85 @@
+import http from 'node:http';
+import {readFile} from 'node:fs/promises';
+import {createHash,timingSafeEqual} from 'node:crypto';
+import {pathToFileURL} from 'node:url';
+import {MAX_CHARS,parseResult,secretLike,applyAnswers} from './core.js';
+
+class HttpError extends Error { constructor(status,message){super(message);this.status=status;} }
+const fail=(status,message)=>{throw new HttpError(status,message);};
+const digest=value=>createHash('sha256').update(value).digest();
+const plain=x=>x&&typeof x==='object'&&!Array.isArray(x);
+export function validateInput(data){
+  if(!plain(data)||Object.keys(data).some(k=>!['mode','title','source','currentDraft','editorDecisions','previousDecisions','metadataHints'].includes(k)))fail(400,'請求格式不正確。');
+  if(!['analyze','revise'].includes(data.mode)||typeof data.title!=='string'||!data.title.trim()||data.title.length>180)fail(400,'請檢查標題及操作。');
+  if(!Array.isArray(data.source)||!data.source.length||data.source.length>3000)fail(400,'來源段落數不正確。');
+  if(data.source.some((s,i)=>!plain(s)||Object.keys(s).some(k=>!['id','text'].includes(k))||s.id!==`P${String(i+1).padStart(3,'0')}`||typeof s.text!=='string'||!s.text.trim()))fail(400,'來源段落格式不正確。');
+  if(data.source.map(s=>s.text).join('\n\n').length>MAX_CHARS)fail(413,'逐字稿超過長度上限。');
+  if(secretLike(JSON.stringify(data)))fail(400,'內容疑似包含金鑰或禁止的識別欄位，請先移除。');
+  if(data.metadataHints!==undefined){if(!plain(data.metadataHints)||Object.keys(data.metadataHints).some(k=>!['eventDate','contentType','topics','context'].includes(k))||Object.values(data.metadataHints).some(v=>typeof v!=='string'||v.length>2000))fail(400,'補充資料格式不正確。');}
+  if(data.mode==='analyze'&&['currentDraft','editorDecisions','previousDecisions'].some(k=>k in data))fail(400,'初次整理不可夾帶修訂資料。');
+  if(data.mode==='revise'){
+    try{parseResult(JSON.stringify(data.currentDraft),data.source);if(!plain(data.editorDecisions)||!Array.isArray(data.previousDecisions))throw Error();applyAnswers(data.currentDraft,data.editorDecisions);}catch{fail(400,'請先完成每個問題的處理方式與必要說明，再交由 AI 修訂。');}
+  }
+  return data;
+}
+async function jsonBody(req){
+  if(!/^application\/json(?:;|$)/i.test(req.headers['content-type']||''))fail(415,'請使用 JSON。');
+  if(Number(req.headers['content-length'])>2000000)fail(413,'請求過大。');
+  const chunks=[];let size=0;
+  for await(const chunk of req){size+=chunk.length;if(size>2000000)fail(413,'請求過大。');chunks.push(chunk);}
+  try{return JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{fail(400,'JSON 格式不正確。');}
+}
+export async function createApp({env=process.env,fetchImpl=fetch,now=Date.now}={}){
+  const key=env.GEMINI_API_KEY||'',token=env.SEAG_ACCESS_TOKEN||'';
+  if(!key||token.length<32||token.length>256||token===key)throw Error('請在 Render 設定 GEMINI_API_KEY 及不同的 SEAG_ACCESS_TOKEN（32–256 字元）。');
+  const origin=env.ALLOWED_ORIGIN||'https://use5566.github.io';
+  if(new URL(origin).origin!==origin||!origin.startsWith('https://'))throw Error('ALLOWED_ORIGIN 必須是完整 HTTPS origin，不含路徑。');
+  const prompts=Object.fromEntries(await Promise.all(['system','analyze','revise','output-schema'].map(async n=>[n,await readFile(new URL(`./prompt-${n}.txt`,import.meta.url),'utf8')])));
+  const tokenHash=digest(token);let busy=false;let calls=[];
+  const safeLimits=(name,fallback,max)=>{const n=Number(env[name]||fallback);if(!Number.isInteger(n)||n<1||n>max)throw Error(`${name} 設定不正確。`);return n;};
+  const hourly=safeLimits('MAX_REQUESTS_PER_HOUR',20,100),daily=safeLimits('MAX_REQUESTS_PER_DAY',100,500);
+  return http.createServer({requestTimeout:30000,headersTimeout:10000,maxHeaderSize:8192},async(req,res)=>{
+    const send=(status,obj)=>{if(!res.destroyed){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(obj));}};
+    res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Vary','Origin');
+    try{
+      if(req.url==='/health'&&req.method==='GET'){send(200,{ok:true});return;}
+      if(req.url!=='/api/organize')fail(404,'找不到此端點。');
+      if(req.headers.origin!==origin)fail(403,'不允許此網站來源。');
+      res.setHeader('Access-Control-Allow-Origin',origin);
+      if(req.method==='OPTIONS'){res.setHeader('Access-Control-Allow-Methods','POST');res.setHeader('Access-Control-Allow-Headers','Content-Type, Authorization');res.writeHead(204);res.end();return;}
+      if(req.method!=='POST')fail(405,'不支援此方法。');
+      const auth=req.headers.authorization||'';
+      if(!auth.startsWith('Bearer ')||!timingSafeEqual(digest(auth.slice(7)),tokenHash))fail(401,'存取碼不正確，請重新輸入。');
+      const input=validateInput(await jsonBody(req));
+      // Also reject accidental use of the exact server credentials in any input.
+      const serialized=JSON.stringify(input);
+      if(serialized.includes(key)||serialized.includes(token))fail(400,'請移除內容中的憑證。');
+      const time=now();calls=calls.filter(t=>time-t<86400000);
+      if(busy)fail(429,'目前已有整理工作，請稍後再試。');
+      if(calls.length>=daily||calls.filter(t=>time-t<3600000).length>=hourly)fail(429,'已達本服務的使用上限，請稍後再試。');
+      busy=true;calls.push(time);
+      const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),110000);
+      const disconnect=()=>{if(!res.writableEnded)controller.abort();};res.on('close',disconnect);
+      try{
+        const response=await fetchImpl('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent',{
+          method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':key},signal:controller.signal,
+          body:JSON.stringify({systemInstruction:{parts:[{text:[prompts.system,prompts[input.mode],prompts['output-schema']].join('\n\n')}]},contents:[{role:'user',parts:[{text:serialized}]}],generationConfig:{responseMimeType:'application/json',maxOutputTokens:32768}})
+        });
+        // Never return or log raw upstream errors, request headers, prompts, or transcripts.
+        if(!response.ok){await response.body?.cancel();fail(response.status===429?429:502,response.status===429?'Gemini 額度或速率已達上限，請稍後再試。':'Gemini 呼叫失敗，請管理者檢查金鑰、模型權限與服務狀態。');}
+        const chunks=[];let size=0;for await(const chunk of response.body){size+=chunk.length;if(size>6000000)fail(502,'AI 回應過大，請縮短逐字稿。');chunks.push(chunk);}const raw=Buffer.concat(chunks).toString('utf8');
+        let payload;try{payload=JSON.parse(raw);}catch{fail(502,'AI 回應格式不正確。');}
+        const candidate=payload.candidates?.[0];
+        if(candidate?.finishReason!=='STOP')fail(502,'AI 未完整產生結果，請縮短逐字稿後再試。');
+        const output=(candidate.content?.parts||[]).filter(p=>!p.thought).map(p=>p.text||'').join('');
+        if(output.includes(key)||output.includes(token))fail(502,'AI 回應未通過安全檢查。');
+        let result;try{if(!Array.isArray(JSON.parse(output).privacyCandidates))throw Error();result=parseResult(output,input.source);}catch{fail(502,'AI 結果未通過格式、來源完整性或去識別檢查。原稿仍保留，請稍後重試或拆分內容。');}
+        send(200,{result});
+      }finally{clearTimeout(timer);res.off('close',disconnect);busy=false;}
+    }catch(error){send(error instanceof HttpError?error.status:503,{error:error instanceof HttpError?error.message:'服務暫時無法完成或已逾時，原稿仍保留，請稍後重試。'});}
+  });
+}
+if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
+  try{const server=await createApp();server.listen(Number(process.env.PORT||10000),'0.0.0.0',()=>console.log('SEAG API 已啟動。'));}
+  catch{console.error('SEAG API 無法啟動：請檢查環境變數與 TXT 檔案。');process.exitCode=1;}
+}

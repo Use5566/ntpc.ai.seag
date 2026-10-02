@@ -1,78 +1,33 @@
 # NTPC AI SEAG-逐字稿整理工具
 
-把研習逐字稿整理成可追溯、經提供者確認的知識內容。第一版是可部署在 GitHub Pages 的純前端網站；不包含資料庫寫入、向量化或自動 AI 呼叫。
+前台：https://use5566.github.io/ntpc.ai.seag/
+API：https://ntpc-ai-seag.onrender.com
 
-## 開啟
+## 流程
+1. 匯入逐字稿，選填日期、資料類型、主題及背景。
+2. 同意傳送尚未去識別的內容，輸入工具存取碼，開始 AI 整理。
+3. AI 同時產生正文、metadata、捨棄清單、待確認問題、去識別建議及來源去向。使用者決定遮蔽或保留、回答問題、手動修改或交給 AI 修訂。
+4. 所有項目確認後匯出 TXT。尚不寫入 Firebase 或向量化。
 
-GitHub Pages：設定儲存庫 **Settings → Pages → Deploy from a branch → main → / (root)**。
+模型固定為 gemini-3.5-flash-lite。
 
-本機預覽（Node.js 22 以上，無須安裝套件）：
+## Render 部署
+- Web Service；Node 22 以上；main 分支；Root Directory 留空。
+- Build Command：`npm install`。
+- Start Command：`node server.mjs`。
+- Health Check Path：`/health`。
+- 必填環境變數：`GEMINI_API_KEY`、`SEAG_ACCESS_TOKEN`（32–256 字元，獨立隨機值，不可與 Gemini Key 相同）。
+- 可選：`ALLOWED_ORIGIN=https://use5566.github.io`（不含路徑）。
+- 可選：`MAX_REQUESTS_PER_HOUR=20`、`MAX_REQUESTS_PER_DAY=100`。
+- 保持單一實例。程序限額在重啟後歸零，不是帳務硬上限。
 
-```sh
-npm start
-```
+真實憑證只填入 Render 環境變數，不放入程式碼、TXT 或 GitHub。api-config.js 只含公開網址，變更網域時需同步 HTML CSP。
 
-開啟 `http://127.0.0.1:4173`。請勿直接雙擊 HTML，因為提示詞透過同源 HTTP 讀取。
+## 提示詞與開發
+模型指令全部放在獨立 TXT：prompt-system.txt、prompt-analyze.txt、prompt-revise.txt、prompt-output-schema.txt。後端讀取自己的部署版本，不接受前台指定模型或系統指令。修改 schema 時同步 core.js。
 
-## 目前可用的流程
+- `npm run dev`：本機前台預覽，127.0.0.1:4173。
+- `npm start`：API 伺服器，需要環境變數。
+- `npm test`：虛構資料及模擬上游測試，不需要真實金鑰。
 
-1. 貼上逐字稿或讀取 UTF-8 TXT（最多 100,000 字元）。
-2. 指定遮蔽詞彙、編輯去識別預覽、人工確認。
-3. 下載 AI 整理任務，在自己選用的 AI 服務處理；貼回或匯入 JSON。
-4. 核對主題正文、metadata、捨棄清單、待確認問題及段落去向；可恢復捨棄內容、手動編輯、下載再修訂任務。
-5. 完成問題處理及最終核對後，下載正式 TXT。另可下載含去識別來源的工作稿續編。
-
-
-## 修改 AI 提示詞
-
-所有模型指導文字都在根目錄的獨立 TXT；JavaScript 只讀取檔案、組裝資料，不內嵌模型指令。
-
-| 檔案 | 用途 |
-| --- | --- |
-| `prompt-system.txt` | 去識別、忠於來源、保留細節及指令隔離原則 |
-| `prompt-analyze.txt` | 初次整理任務 |
-| `prompt-revise.txt` | 根據人工回覆與修改重新整理 |
-| `prompt-output-schema.txt` | AI 結果的 JSON 格式 |
-
-只調整語氣、保留標準或整理方法時，可直接修改 TXT。若修改 JSON 欄位，還需要同步 `core.js` 的驗證與前台欄位。提示詞屬公開內容，不要放入 API Key 或私密資訊。
-
-## API Key 與資料保密
-
-- 本版沒有 API Key 輸入框、沒有模型 API 請求、沒有 Firebase 憑證。
-- 不使用 localStorage、sessionStorage、IndexedDB、Cookie、分析追蹤或外部字型。
-- 編輯資料只在分頁記憶體；重新整理或關閉可能遺失。工作稿下載由使用者主動觸發。
-- HTML 的 CSP 將連線限制在本站，文字以 `textContent`／表單值呈現，不將 AI 輸出解釋成 HTML。
-- `hostOrganization`、`participantRoles`、`speakers` 不在允許 schema 內；其他未允許欄位也會被拒絕。
-- 自動遮蔽只處理指定詞彙和特定角色標籤，不是完整個資偵測器；提供者仍需檢查所有文字。
-- 金鑰模式檢查只是額外防誤貼，不能保證偵測所有秘密。
-- 正式 TXT 不包含原始逐字稿、遮蔽詞彙與未恢復的捨棄內容。工作稿／編輯紀錄含去識別來源及捨棄內容，不應直接向量化。
-- 若要手動把任務交給外部 AI，請自行確認該服務可接受此資料。
-
-## 後續自動 AI 串接邊界
-
-本版刻意不提供「把 Key 貼進網頁」的捷徑。自動流程應由 Firebase 等伺服器端處理：
-
-1. 登入驗證與白名單授權。
-2. 伺服器 Secret Manager 保存模型金鑰；不把金鑰傳給瀏覽器。
-3. 伺服器從自己的部署版本讀取 TXT 提示詞；不信任瀏覽器送來的任意系統提示詞。
-4. 請求上限、速率限制、逾時、重試、輸入與輸出驗證，以及不記錄正文／金鑰的日誌。
-5. 只接收去識別資料。核對後的正式內容才另外發布入庫。
-
-GitHub Actions secrets **不能**在建置時注入前端 JavaScript 當作保密方式。任何送至瀏覽器的模型金鑰都會外洩。新增後端時，才根據實際網域及驗證機制調整 CSP 與 CORS。
-
-## 資料規則與限制
-
-- 每個來源段落必須有唯一去向；捨棄／待確認狀態須對應有效項目。這只能檢查結構，不保證語意無遺漏。
-- AI 輸入來源最多 100,000 字元，結果總長上限 1,500,000 字元；外部 AI 的可用上下文可能更小，需自行拆分。
-- 發言者與時間戳的專業解析尚未實作；目前依空白行編號，來源順序保留。
-- 回答問題後，「納入人工補充」會保留原草稿並附上明確標示的人工說明，不假裝是 AI 重寫。更正／不納入決定需要人修改原文，或交由外部 AI 修訂後再匯入。
-- 本版 metadata 是候選欄位：日期、資料類型、主題、摘要與限制；不代表正式資料庫 schema 已定案。
-
-## 檢查
-
-```sh
-npm test
-node --check app.js
-```
-
-測試包括去識別、來源去向完整性、禁止欄位、無效日期、捨棄項目關聯、釐清流程與正式稿匯出邊界。
+安全設計與限制詳見 SECURITY.md。共享存取碼只適合封閉測試；正式多人服務應使用個別帳號及持久化限額。AI 的去識別及語意正確性仍需人工核對。
