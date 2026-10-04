@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+ <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer">
+ <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://ntpc-ai-seag.onrender.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+ <title>手動向量化｜NTPC AI SEAG</title><link rel="stylesheet" href="styles.css"><script type="module" src="admin.js?v=0.6.0"></script>
+</head>
+<body>
+ <header class="topbar"><a class="brand" href="./">NTPC AI SEAG-逐字稿整理工具</a><a href="./">返回整理工具</a></header>
+ <main>
+  <h1>手動向量化</h1>
+  <p>每次開始最多處理一份正式稿的 3 個段落。完成本批後停止，剩餘內容需再次手動開始；不設排程。</p>
+  <section class="card">
+   <label class="field-label" for="admin-token">管理碼</label><input id="admin-token" type="password" autocomplete="off" maxlength="256" placeholder="輸入 SEAG_ADMIN_TOKEN，不是工具存取碼或 API Key">
+   <p class="muted">僅在此分頁操作期間使用，不存入瀏覽器儲存空間；完成後請清除管理碼。</p>
+   <div class="button-row"><button id="load-jobs" class="primary">查詢處理紀錄</button><button id="clear-token" class="secondary">清除管理碼</button></div>
+  </section>
+  <p id="admin-message" role="status" aria-live="polite"></p>
+  <section class="card"><h2>處理紀錄</h2><p>每頁最多 20 筆，查詢不會呼叫向量模型。系統測試資料不列入。</p><div id="jobs"></div><button id="next-page" class="secondary" hidden>下一頁</button></section>
+  <section id="plan" class="card" hidden>
+   <h2 id="plan-title"></h2><p id="plan-details"></p><p id="plan-usage"></p>
+   <p>開始後，這批正式稿段落會經 Render 傳送至 Google Gemini Embedding 2，產生 1536 維向量並存入 Firestore。已存妥的段落不重做；模型回覆若在存檔前中斷，重試可能再次計費。</p>
+   <label class="check-row"><input id="vector-confirm" type="checkbox"><span>我確認執行本批向量化，並了解會使用 Gemini API 額度。</span></label>
+   <button id="run-vector" class="primary" disabled>開始本批向量化</button>
+  </section>
+ </main>
+</body></html>

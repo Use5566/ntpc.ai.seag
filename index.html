@@ -9,13 +9,13 @@
   <title>NTPC AI SEAG-逐字稿整理工具</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
-  <script type="module" src="app.js?v=0.5.0"></script>
+  <script type="module" src="app.js?v=0.6.0"></script>
 </head>
 <body>
   <a class="skip" href="#workspace">跳至編輯區</a>
   <header class="topbar">
     <a class="brand" href="./" aria-label="NTPC AI SEAG-逐字稿整理工具首頁">NTPC AI SEAG-逐字稿整理工具</a>
-    <div class="top-actions"><button id="help-button" class="text-button">使用說明</button></div>
+    <div class="top-actions"><a href="admin.html">手動向量化</a><button id="help-button" class="text-button">使用說明</button></div>
   </header>
   <div class="layout">
     <aside class="sidebar">
@@ -63,7 +63,7 @@
         <div class="bottom-actions"><button id="save-work" class="secondary">下載工作稿</button><button id="to-final" class="primary">下一步：確認與儲存</button></div><label class="resume-label">繼續先前的工作稿：<input id="resume-file" type="file" accept=".json,application/json"></label>
       </section>
       <section id="panel-4" class="panel" hidden>
-        <div class="card final-card"><h2>正式稿預覽</h2><p>確認送出後，正式稿會存為 TXT、在指定試算表登記，並寫入 Firestore 知識庫。只儲存已確認的正文及 metadata；原始逐字稿、遮蔽詞彙、未恢復的捨棄內容及回答歷程不會入庫。</p><pre id="final-preview"></pre><label class="check-row"><input type="checkbox" id="final-confirm"><span>我已確認正文、metadata 與補充說明一致，且沒有單位、參與者角色或其他應遮蔽資訊；同意將正式稿存至指定 Google 共用雲端硬碟、試算表與 Firestore。</span></label><div class="button-row"><button id="save-cloud" class="primary" disabled>確認送出並儲存</button><button id="export-txt" class="secondary" disabled>僅下載 TXT 備份</button></div><div id="archive-receipt" role="status" hidden></div><p class="muted">相同內容重送會沿用既有紀錄。修改內容後送出會建立新紀錄；正式稿會寫入 Firestore；向量化尚未啟用。TXT 與紀錄的可見範圍依指定資料夾及試算表的現有共用權限。</p></div><div class="bottom-actions"><button class="secondary" data-back="3">返回修改</button><button id="export-audit" class="secondary">另存去識別編輯紀錄</button></div>
+        <div class="card final-card"><h2>正式稿預覽</h2><p>確認送出後，正式稿會存為 TXT、在指定試算表登記，並寫入 Firestore 知識庫。只儲存已確認的正文及 metadata；原始逐字稿、遮蔽詞彙、未恢復的捨棄內容及回答歷程不會入庫。</p><pre id="final-preview"></pre><label class="check-row"><input type="checkbox" id="final-confirm"><span>我已確認正文、metadata 與補充說明一致，且沒有單位、參與者角色或其他應遮蔽資訊；同意將正式稿存至指定 Google 共用雲端硬碟、試算表與 Firestore。</span></label><div class="button-row"><button id="save-cloud" class="primary" disabled>確認送出並儲存</button><button id="export-txt" class="secondary" disabled>僅下載 TXT 備份</button></div><div id="archive-receipt" role="status" hidden></div><p class="muted">相同內容重送會沿用既有紀錄。修改內容後送出會建立新紀錄；正式稿會寫入 Firestore；向量化由管理者另行手動啟動。TXT 與紀錄的可見範圍依指定資料夾及試算表的現有共用權限。</p></div><div class="bottom-actions"><button class="secondary" data-back="3">返回修改</button><button id="export-audit" class="secondary">另存去識別編輯紀錄</button></div>
       </section>
       <footer class="page-footer"><button id="reset-button" class="text-button">清除本次內容</button></footer>
     </main>

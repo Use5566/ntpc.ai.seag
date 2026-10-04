@@ -7,7 +7,7 @@ API：https://ntpc-ai-seag.onrender.com
 1. 匯入逐字稿，選填日期、資料類型、主題及背景。
 2. 同意傳送尚未去識別的內容，輸入工具存取碼，開始 AI 整理。
 3. AI 同時產生正文、metadata、捨棄清單、待確認問題、去識別建議及來源去向。使用者決定遮蔽或保留、回答問題、手動修改或交給 AI 修訂。
-4. 所有項目確認後按「確認送出並儲存」，TXT 存入指定共用雲端硬碟，紀錄寫入 Google 試算表。另可下載 TXT 備份。正式稿同時寫入 Firestore；向量化尚未啟用。
+4. 所有項目確認後按「確認送出並儲存」，TXT 存入指定共用雲端硬碟，紀錄寫入 Google 試算表。另可下載 TXT 備份。正式稿同時寫入 Firestore；向量化由管理者另行手動啟動。
 
 模型固定為 gemini-3.5-flash-lite。
 
@@ -57,3 +57,17 @@ API：https://ntpc-ai-seag.onrender.com
 - 0.4.0 舊紀錄不會自動回填；重送相同正式稿可以補建 Firestore 資料。舊版已儲存狀態只代表 Drive 與 Sheets。
 - 系統測試使用 systemChecks、systemCheckJobs，狀態 excluded_system_test；不得用於知識檢索。此模式只能由伺服器依既有紀錄類型判定，前台無法指定。
 - firestore.rules 是用戶端拒絕所有讀寫的規則範本；後端權限仍由 IAM 管理。規則檔存在不等於已部署，正式環境需確認為正式版模式。
+
+## 手動向量化（0.6.0）
+- 管理頁：admin.html。Render 設定 SEAG_ADMIN_TOKEN（32–256 字元，與 Gemini Key、SEAG_ACCESS_TOKEN 不同）。沒有管理碼或碼值重複時管理端點停用，投稿整理仍可使用。
+- 管理碼只在分頁輸入欄位／請求期間使用，不存 localStorage、sessionStorage 或 cookie；提供清除按鈕，離頁清除。
+- POST /api/vector/list、/api/vector/preview 為查詢，不啟動模型；POST /api/vector/run 需 documentId、planHash、confirmed:true。
+- 沒有排程、背景工作者或啟動觸發。每次明確按下開始只處理一份稿件最多 3 段；剩餘段落必須手動再次確認。
+- Unicode 每段最多 1800 個 code point、相鄰重疊 150 個；優先在句末或換行切分，保留 start/end 位置與完整文字，不讓 AI 重新摘要。
+- 模型 gemini-embedding-2、1536 維；獨立 TXT 範本 prompt-embedding-document.txt。將模型、維度、分段規則、範本內容納入設定指紋，變更後拒絕與既有進度混用。
+- chunks/{稿件ID_設定指紋前16碼_段序} 保存正文片段、位置、來源ID、模型、設定指紋及 Firestore 原生 vector 欄位 embedding。
+- ingestionJobs 保存 completedChunks、totalChunks、embeddingRequests、configHash、leaseOwner、leaseUntil。Firestore updateTime 條件防止同時取得工作，租期五分鐘，程序中斷後可由管理者手動重試。
+- 每段向量與進度同次原子提交；提交回覆遺失時讀回進度，已存妥的段落不重做。若模型回覆在入庫前中斷，重試可能再次計費。embeddingRequests 是請求嘗試數，不是 Google 帳務用量。
+- 管理查詢每小時最多 120 次；執行沿用服務每小時／每日上限。這些程序計數在重啟後重設，不是帳務硬上限。
+- 系統驗收可在伺服器建立 createVectorizer({... ,testOnly:true})，固定使用 systemChecks/systemCheckJobs/systemCheckChunks；HTTP 不接受 testOnly 或自訂集合。
+- 本版完成向量產生與儲存，尚未提供語意查詢、向量索引部署或問答。後續檢索必須只選 knowledge、相同設定版本且 job 狀態 ready 的資料。

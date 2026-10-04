@@ -6,7 +6,7 @@ import {persistKnowledge} from './firestore.mjs';
 export const FOLDER_ID='1_JvYzPgw25KdYCP0fT_ajpm4sdBwHZJe';
 export const SPREADSHEET_ID='1lvZLaRW6ULLGXASGBhvIoOOEPsk3nq6iiK0sxUnl77o';
 export const SHEET_ID=0;
-export const VERSION='0.5.0';
+export const VERSION='0.6.0';
 export const COLUMNS=[
  ['紀錄編號','依正式稿內容產生的 SHA-256 編號；相同內容重送使用相同紀錄。'],
  ['送出時間（臺北）','伺服器首次接受送出的時間，時區 UTC+08:00。'],
@@ -135,5 +135,8 @@ export function createStorage({env=process.env,fetchImpl=fetch,readFileImpl=read
    if(error instanceof StorageError)throw error;fail('STORAGE_UNAVAILABLE','儲存連線未完成，請保留工作稿並重送；系統會沿用相同紀錄與檔案編號。');
   }finally{locked=false;}
  }
- return {save,initialize};
+ return {save,initialize,firestoreRequest:(url,options)=>{
+  if(!url.startsWith('https://firestore.googleapis.com/v1/projects/ntpc-ai-seag/databases/(default)/documents'))throw Error('Invalid Firestore destination');
+  return api(url,options);
+ }};
 }
