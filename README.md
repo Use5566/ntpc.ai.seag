@@ -71,3 +71,10 @@ API：https://ntpc-ai-seag.onrender.com
 - 管理查詢每小時最多 120 次；執行沿用服務每小時／每日上限。這些程序計數在重啟後重設，不是帳務硬上限。
 - 系統驗收可在伺服器建立 createVectorizer({... ,testOnly:true})，固定使用 systemChecks/systemCheckJobs/systemCheckChunks；HTTP 不接受 testOnly 或自訂集合。
 - 本版完成向量產生與儲存，尚未提供語意查詢、向量索引部署或問答。後續檢索必須只選 knowledge、相同設定版本且 job 狀態 ready 的資料。
+
+## v0.7.0：同頁整合與知識問答
+首頁以 #import、#vector、#chat 切換匯入、手動向量化、知識問答，切換不清除稿件。舊 admin.html 導向 #vector。
+問答 POST /api/chat 使用 SEAG_ACCESS_TOKEN；向量管理仍使用 SEAG_ADMIN_TOKEN。無需新增環境變數。問題最多 2000 字元，歷史最多 6 則，僅記憶體保存。
+檢索只使用 humanConfirmed、knowledge、工作 ready 且模型設定相同的段落，核對正文指紋及段落位置。問題使用 Gemini Embedding 2，回答使用 Gemini 3.5 Flash-Lite；來源可展開核對。查詢不寫入資料庫，也不觸發稿件向量化。
+此版適合小型知識庫：後端讀取 chunks，計算正規化向量餘弦相似度，選前 5 段。總段落上限 500（含尚未完成工作已產生的段落），超過明確拒絕，不會只查部分資料。每次問題會產生 Firestore 讀取與模型用量；擴大前需升級 Firestore 原生向量索引檢索。
+問答指令：prompt-chat.txt；查詢向量範本：prompt-embedding-query.txt。所有來源與歷史視為不可信資料，來源編號由後端核對；引用存在不等於語意必然正確，使用者仍應核對。

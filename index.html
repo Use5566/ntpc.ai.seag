@@ -9,15 +9,17 @@
   <title>NTPC AI SEAG-逐字稿整理工具</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
-  <script type="module" src="app.js?v=0.6.0"></script>
+  <script type="module" src="app.js?v=0.7.0"></script>
+<script type="module" src="admin.js?v=0.7.0"></script><script type="module" src="portal.js?v=0.7.0"></script>
 </head>
 <body>
   <a class="skip" href="#workspace">跳至編輯區</a>
   <header class="topbar">
     <a class="brand" href="./" aria-label="NTPC AI SEAG-逐字稿整理工具首頁">NTPC AI SEAG-逐字稿整理工具</a>
-    <div class="top-actions"><a href="admin.html">手動向量化</a><button id="help-button" class="text-button">使用說明</button></div>
+    <div class="top-actions"><button id="help-button" class="text-button">使用說明</button></div>
   </header>
-  <div class="layout">
+  <nav class="portal-nav" aria-label="功能選擇"><a href="#import">匯入資料</a><a href="#vector">手動向量化</a><a href="#chat">知識問答</a></nav>
+  <div class="layout" id="import-workspace">
     <aside class="sidebar">
       <nav id="steps" aria-label="整理步驟">
         <button data-step="0" class="step active" aria-current="step"><span class="step-number">01</span><span><strong>匯入逐字稿</strong><small>貼上或讀取文字檔</small></span></button>
@@ -68,6 +70,23 @@
       <footer class="page-footer"><button id="reset-button" class="text-button">清除本次內容</button></footer>
     </main>
   </div>
+<main id="vector-workspace" hidden>
+  <h1>手動向量化</h1>
+  <p>每次開始最多處理一份正式稿的 3 個段落。完成本批後停止，剩餘內容需再次手動開始；不設排程。</p>
+  <section class="card">
+   <label class="field-label" for="admin-token">管理碼</label><input id="admin-token" type="password" autocomplete="off" maxlength="256" placeholder="輸入 SEAG_ADMIN_TOKEN，不是工具存取碼或 API Key">
+   <p class="muted">僅在此分頁操作期間使用，不存入瀏覽器儲存空間；完成後請清除管理碼。</p>
+   <div class="button-row"><button id="load-jobs" class="primary">查詢處理紀錄</button><button id="clear-token" class="secondary">清除管理碼</button></div>
+  </section>
+  <p id="admin-message" role="status" aria-live="polite"></p>
+  <section class="card"><h2>處理紀錄</h2><p>每頁最多 20 筆，查詢不會呼叫向量模型。系統測試資料不列入。</p><div id="jobs"></div><button id="next-page" class="secondary" hidden>下一頁</button></section>
+  <section id="plan" class="card" hidden>
+   <h2 id="plan-title"></h2><p id="plan-details"></p><p id="plan-usage"></p>
+   <p>開始後，這批正式稿段落會經 Render 傳送至 Google Gemini Embedding 2，產生 1536 維向量並存入 Firestore。已存妥的段落不重做；模型回覆若在存檔前中斷，重試可能再次計費。</p>
+   <label class="check-row"><input id="vector-confirm" type="checkbox"><span>我確認執行本批向量化，並了解會使用 Gemini API 額度。</span></label>
+   <button id="run-vector" class="primary" disabled>開始本批向量化</button>
+  </section>
+ </main><main id="chat-workspace" hidden><h1>知識問答</h1><p>查詢已完成向量化的正式稿，回答附來源段落。問題及最近對話會傳送至 Google Gemini；不儲存對話。</p><section class="card"><label class="field-label" for="chat-token">工具存取碼</label><input id="chat-token" type="password" autocomplete="off" maxlength="256" placeholder="輸入 SEAG_ACCESS_TOKEN，不是 Gemini API Key"><div id="chat-messages" aria-live="polite"></div><label class="field-label" for="chat-question">問題</label><textarea id="chat-question" rows="4" maxlength="2000" placeholder="例如：素養導向評量的命題原則有哪些？"></textarea><p id="chat-status" role="status"></p><div class="button-row"><button id="chat-send" class="primary">送出問題</button><button id="chat-clear" class="secondary">清除對話與存取碼</button></div></section></main>
   <dialog id="source-dialog"><div class="dialog-heading"><h2>來源對照</h2><button class="secondary" data-close="source-dialog">關閉</button></div><div id="source-blocks"></div></dialog>
   <dialog id="help-dialog"><div class="dialog-heading"><h2>使用說明</h2><button class="secondary" data-close="help-dialog">關閉</button></div><ol class="help-list"><li>貼上逐字稿或匯入 UTF-8 TXT。</li><li>選填日期、類型、主題及背景，確認同意傳送內容後開始 AI 整理。</li><li>輸入工具存取碼，開始 AI 整理。尚未完成去識別的內容會經 Render 傳至 Google Gemini；也可手動下載任務與匯入 JSON。</li><li>決定去識別建議，再核對正文、metadata、完全捨棄的內容與問題，完成必要的人工補充。</li><li>確認後按「確認送出並儲存」，將正式稿存為 TXT、登記至指定試算表並寫入 Firestore。可另外下載 TXT 備份。</li></ol><p>本工具僅在確認送出時儲存正式稿與 metadata 至指定 Google Drive、試算表與 Firestore，不儲存原始逐字稿、捨棄內容或編輯歷程，也不使用瀏覽器自動儲存或追蹤服務。AI 整理會將送出的內容交給 Render 與 Google Gemini 處理，供應商的保留規則依其服務設定與條款。關閉分頁會失去未下載的內容。可以在檢閱階段下載工作稿，之後使用「匯入工作稿」續編。</p><label class="upload-button" for="resume-file-help">匯入工作稿<input id="resume-file-help" type="file" accept=".json,application/json" class="visually-hidden"></label><p class="muted">API Key 不應貼進逐字稿，也不應提交到 GitHub。Gemini 金鑰只由 Render 後端讀取；測試版使用獨立存取碼驗證。</p></dialog>
   <dialog id="token-dialog"><h2>AI 修訂存取碼</h2><p>請輸入工具存取碼。送出後會將目前草稿、已核對來源及回答交給 Gemini 修訂。</p><label for="revision-token" class="field-label">工具存取碼</label><input id="revision-token" type="password" autocomplete="off" maxlength="256"><div class="button-row"><button class="secondary" data-close="token-dialog">取消</button><button id="confirm-revision" class="primary">開始 AI 修訂</button></div></dialog>

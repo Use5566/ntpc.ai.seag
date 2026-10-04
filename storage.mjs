@@ -6,7 +6,7 @@ import {persistKnowledge} from './firestore.mjs';
 export const FOLDER_ID='1_JvYzPgw25KdYCP0fT_ajpm4sdBwHZJe';
 export const SPREADSHEET_ID='1lvZLaRW6ULLGXASGBhvIoOOEPsk3nq6iiK0sxUnl77o';
 export const SHEET_ID=0;
-export const VERSION='0.6.0';
+export const VERSION='0.7.0';
 export const COLUMNS=[
  ['紀錄編號','依正式稿內容產生的 SHA-256 編號；相同內容重送使用相同紀錄。'],
  ['送出時間（臺北）','伺服器首次接受送出的時間，時區 UTC+08:00。'],
