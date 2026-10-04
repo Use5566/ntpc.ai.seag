@@ -47,7 +47,7 @@ export function createVectorizer({api,env=process.env,fetchImpl=fetch,now=Date.n
   if(!Number.isSafeInteger(completed)||completed<0||completed>parts.length)fail('VECTOR_INTEGRITY','處理進度不正確。');
   return {d,j,raw,job,parts,completed,...cfg,planHash:hash(id+cfg.configHash)};
  }
- const summary=p=>({documentId:p.d.recordId,title:p.d.title,model:MODEL,dimensions:DIMENSIONS,totalChunks:p.parts.length,completedChunks:p.completed,remainingChunks:p.parts.length-p.completed,maxChunksPerClick:BATCH_SIZE,nextInputCharacters:p.parts.slice(p.completed,p.completed+BATCH_SIZE).reduce((n,c)=>n+[...c.text].length+[...p.d.title].length+p.template.length,0),planHash:p.planHash,status:p.j.status,attempts:p.j.attempts||0,embeddingRequests:p.j.embeddingRequests||0});
+ const summary=p=>({documentId:p.d.recordId,title:p.d.title,model:MODEL,dimensions:DIMENSIONS,totalChunks:p.parts.length,completedChunks:p.completed,remainingChunks:p.parts.length-p.completed,maxChunksPerClick:BATCH_SIZE,nextInputCharacters:p.parts.slice(p.completed,p.completed+BATCH_SIZE).reduce((n,c)=>n+[...c.text].length+[...p.d.title].length+p.template.length,0),planHash:p.planHash,status:p.j.status,attempts:p.j.attempts||0,embeddingRequests:p.j.embeddingRequests||0,searchPublished:p.j.searchPublished===true});
  async function list({pageToken=''}={}){
   if(typeof pageToken!=='string'||pageToken.length>3000)fail('VECTOR_INPUT','分頁資訊不正確。',400);
   const r=await api(FIRESTORE_ROOT+'/'+jobs+'?pageSize=20'+(pageToken?'&pageToken='+encodeURIComponent(pageToken):''));
@@ -60,11 +60,28 @@ export function createVectorizer({api,env=process.env,fetchImpl=fetch,now=Date.n
   await api(FIRESTORE_ROOT+':commit',{method:'POST',json:{writes:[...extra,jobWrite(p,j)]}});
   const raw=await api(FIRESTORE_ROOT+'/'+jobs+'/'+p.d.recordId);p.job=raw;p.j=decode(raw);p.completed=p.j.completedChunks||0;
  }
+ // Publish all chunks atomically only after the entire document is complete.
+ async function publish(p){
+  if(p.completed!==p.parts.length)fail('VECTOR_INTEGRITY','尚未完成的稿件不可開放查詢。');
+  if(p.j.searchPublished===true)return;
+  const writes=[];
+  for(let index=0;index<p.parts.length;index++){
+   const id=p.d.recordId+'_'+p.configHash.slice(0,16)+'_'+String(index).padStart(4,'0');
+   const raw=await api(FIRESTORE_ROOT+'/'+chunksCollection+'/'+id,{allow404:true});
+   if(!raw)fail('VECTOR_INTEGRITY','向量段落缺失，未開放查詢。');
+   const {embedding,...fields}=raw.fields;const c=decode({fields}),part=p.parts[index];
+   if(c.documentId!==p.d.recordId||c.configHash!==p.configHash||c.contentSha256!==p.d.contentSha256||c.text!==part.text||c.index!==index||c.start!==part.start||c.end!==part.end)fail('VECTOR_INTEGRITY','向量段落不一致，未開放查詢。');
+   nativeVector(embedding?.mapValue?.fields?.value?.arrayValue?.values?.map(v=>v.doubleValue??Number(v.integerValue)));
+   writes.push({update:{name:raw.name,fields:{searchReady:{booleanValue:true}}},updateMask:{fieldPaths:['searchReady']},currentDocument:{updateTime:raw.updateTime}});
+  }
+  await updateJob(p,{...p.j,status:'ready',searchPublished:true},writes);
+ }
+ async function publishExisting({documentId}){const p=await load(documentId);if(p.j.status!=='ready')fail('VECTOR_INPUT','只可補登已完成的稿件。',400);await publish(p);return {documentId,published:true};}
  async function run({documentId,planHash,confirmed}){
   if(confirmed!==true||typeof planHash!=='string')fail('VECTOR_INPUT','請先預覽並確認本次向量化。',400);
   const p=await load(documentId);
   if(planHash!==p.planHash)fail('VECTOR_PLAN','稿件或設定已變動，請重新預覽。',409);
-  if(p.completed===p.parts.length)return {...summary(p),processedNow:0};
+  if(p.completed===p.parts.length){await publish(p);return {...summary(p),processedNow:0};}
   if((p.j.leaseUntil||0)>now())fail('VECTOR_BUSY','此稿件正在處理，請稍後重新預覽。',409);
   const owner=randomUUID(),started=now();let processed=0;
   const timestamp=()=>new Date(now()).toISOString();
@@ -81,12 +98,13 @@ export function createVectorizer({api,env=process.env,fetchImpl=fetch,now=Date.n
     const bytes=[];let size=0;for await(const b of r.body){size+=b.length;if(size>200000)fail('VECTOR_RESULT','向量回覆超過上限。');bytes.push(b);}
     let payload;try{payload=JSON.parse(Buffer.concat(bytes).toString('utf8'));}catch{fail('VECTOR_RESULT','向量回覆格式不正確。');}
     const embedding=nativeVector(payload.embedding?.values);
-    const fields=firestoreFields({documentId,contentSha256:p.d.contentSha256,configHash:p.configHash,model:MODEL,dimensions:DIMENSIONS,index,start:part.start,end:part.end,text:part.text,title:p.d.title,createdAt:timestamp(),recordType:testOnly?'system_test':'knowledge'});fields.embedding=embedding;
+    const fields=firestoreFields({documentId,contentSha256:p.d.contentSha256,configHash:p.configHash,model:MODEL,dimensions:DIMENSIONS,index,start:part.start,end:part.end,text:part.text,title:p.d.title,createdAt:timestamp(),recordType:testOnly?'system_test':'knowledge',searchReady:false});fields.embedding=embedding;
     const complete=index+1===p.parts.length;
     await updateJob(p,{...p.j,completedChunks:index+1,status:complete?'ready':'processing',updatedAt:timestamp()},[{update:{name:name(chunksCollection,chunkId),fields},currentDocument:{exists:false}}]);
     processed++;
    }
    await updateJob(p,{...p.j,status:p.completed===p.parts.length?'ready':'partial',leaseOwner:'',leaseUntil:0,updatedAt:timestamp()});
+   if(p.completed===p.parts.length)await publish(p);
    return {...summary(p),processedNow:processed};
   }catch(error){
    // A lost commit response is reconciled by reading durable progress; never rewind it.
@@ -94,5 +112,5 @@ export function createVectorizer({api,env=process.env,fetchImpl=fetch,now=Date.n
    if(error instanceof VectorError)throw error;fail('VECTOR_RETRY','處理中斷，已完成段落會保留。請重新預覽後手動繼續；未存妥的模型回覆可能需要重新計費。');
   }
  }
- return {list,preview,run};
+ return {list,preview,run,publishExisting};
 }

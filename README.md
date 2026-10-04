@@ -76,5 +76,13 @@ API：https://ntpc-ai-seag.onrender.com
 首頁以 #import、#vector、#chat 切換匯入、手動向量化、知識問答，切換不清除稿件。舊 admin.html 導向 #vector。
 問答 POST /api/chat 使用 SEAG_ACCESS_TOKEN；向量管理仍使用 SEAG_ADMIN_TOKEN。無需新增環境變數。問題最多 2000 字元，歷史最多 6 則，僅記憶體保存。
 檢索只使用 humanConfirmed、knowledge、工作 ready 且模型設定相同的段落，核對正文指紋及段落位置。問題使用 Gemini Embedding 2，回答使用 Gemini 3.5 Flash-Lite；來源可展開核對。查詢不寫入資料庫，也不觸發稿件向量化。
-此版適合小型知識庫：後端讀取 chunks，計算正規化向量餘弦相似度，選前 5 段。總段落上限 500（含尚未完成工作已產生的段落），超過明確拒絕，不會只查部分資料。每次問題會產生 Firestore 讀取與模型用量；擴大前需升級 Firestore 原生向量索引檢索。
+0.7.0 舊版限制（0.8.0 已移除）：後端讀取 chunks，計算正規化向量餘弦相似度，選前 5 段。總段落上限 500（含尚未完成工作已產生的段落），超過明確拒絕，不會只查部分資料。每次問題會產生 Firestore 讀取與模型用量；擴大前需升級 Firestore 原生向量索引檢索。
 問答指令：prompt-chat.txt；查詢向量範本：prompt-embedding-query.txt。所有來源與歷史視為不可信資料，來源編號由後端核對；引用存在不等於語意必然正確，使用者仍應核對。
+
+
+## v0.8.0：Firestore 原生向量搜尋
+問答使用 documents:runQuery 的 findNearest，COSINE、1536 維、取最相關 5 段；前置篩選 recordType、configHash、searchReady。沒有 500 段總量上限，也不回退全量掃描。問題向量仍需一次 Embedding 請求；無結果不呼叫回答模型。
+分批向量化先寫 searchReady=false；全稿完成後以原子提交開放所有段落及 job.searchPublished。若登錄中斷，可在管理頁預覽後按「完成搜尋登錄」，不重做向量。既有 ready 稿件可以透過 createVectorizer().publishExisting({documentId}) 補登；不需重新產生向量。這個方法不接受前台任意呼叫。
+部署前以有索引管理權限的帳號執行 setup-vector-index.sh；等索引 READY 再啟用此版。不需擴大日常 Render 服務帳戶 IAM 權限。索引檔 firestore.indexes.json 供 Firebase CLI 使用；shell 腳本含正式 chunks 及隔離 systemCheckChunks 索引。建立索引不呼叫 Gemini。
+
+已完成舊稿的一次性補登：Render Shell 執行 `node migrate-search-ready.mjs`；隔離測試使用 `node migrate-search-ready.mjs --system-test`。只補上搜尋旗標，不呼叫模型、不更動既有向量，且可安全重跑。未完成稿件不補登。

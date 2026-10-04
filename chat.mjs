@@ -22,12 +22,23 @@ export function createChat({api,env=process.env,fetchImpl=fetch,readFileImpl=rea
   validateChat(input);
   const template=await readFileImpl(new URL('./prompt-embedding-document.txt',import.meta.url),'utf8');
   const configHash=createHash('sha256').update(JSON.stringify({model:MODEL,dimensions:DIMENSIONS,chunking:'unicode1800_overlap150_boundary900_v1',template})).digest('hex');
-  const rows=[];let page='';
-  do{const r=await api(FIRESTORE_ROOT+'/'+collection+'?pageSize=100'+(page?'&pageToken='+encodeURIComponent(page):''));rows.push(...(r.documents||[]));if(rows.length>500||(rows.length===500&&r.nextPageToken))fail('知識庫已超過此版 500 段查詢容量，請管理者升級索引。');page=r.nextPageToken||'';}while(page);
+  const where={compositeFilter:{op:'AND',filters:[
+   {fieldFilter:{field:{fieldPath:'recordType'},op:'EQUAL',value:{stringValue:type}}},
+   {fieldFilter:{field:{fieldPath:'configHash'},op:'EQUAL',value:{stringValue:configHash}}},
+   {fieldFilter:{field:{fieldPath:'searchReady'},op:'EQUAL',value:{booleanValue:true}}}
+  ]}};
+  const queryTemplate=await readFileImpl(new URL('./prompt-embedding-query.txt',import.meta.url),'utf8');
+  const query=input.history.filter(m=>m.role==='user').map(m=>m.text).concat(input.question).join('\n');
+  const e=await model(MODEL+':embedContent',{model:'models/'+MODEL,content:{parts:[{text:queryTemplate.replace('{{content}}',()=>query)}]},outputDimensionality:DIMENSIONS});
+  const queryVector=nativeVector(e.embedding?.values);
+  let response;
+  try{response=await api(FIRESTORE_ROOT+':runQuery',{method:'POST',json:{structuredQuery:{from:[{collectionId:collection}],where,findNearest:{vectorField:{fieldPath:'embedding'},queryVector,distanceMeasure:'COSINE',limit:5}}}});}catch{fail('原生向量查詢未完成，請確認 Firestore 向量索引已就緒及服務帳戶查詢權限。');}
+  if(!Array.isArray(response))fail('知識搜尋回覆格式不正確。');
+  const rows=response.filter(r=>r.document).map(r=>r.document);
   const candidates=[],cache=new Map();
   for(const raw of rows){
    const {embedding,...fields}=raw.fields;const c=decode({fields});
-   if(c.recordType!==type||c.configHash!==configHash||c.model!==MODEL||c.dimensions!==DIMENSIONS||!/^SEAG-[a-f0-9]{64}$/.test(c.documentId))continue;
+   if(c.searchReady!==true||c.recordType!==type||c.configHash!==configHash||c.model!==MODEL||c.dimensions!==DIMENSIONS||!/^SEAG-[a-f0-9]{64}$/.test(c.documentId))continue;
    if(!cache.has(c.documentId)){
     const j=await api(FIRESTORE_ROOT+'/'+jobs+'/'+c.documentId,{allow404:true});
     const job=j&&decode(j);let doc=null;
@@ -36,17 +47,10 @@ export function createChat({api,env=process.env,fetchImpl=fetch,readFileImpl=rea
    }
    const d=cache.get(c.documentId);if(!d)continue;
    if(c.contentSha256!==d.contentSha256||!Number.isInteger(c.start)||!Number.isInteger(c.end)||c.start<0||c.end<=c.start||[...d.body].slice(c.start,c.end).join('')!==c.text)fail('知識段落完整性檢查失敗。');
-   const values=embedding?.mapValue?.fields?.value?.arrayValue?.values?.map(v=>v.doubleValue??Number(v.integerValue));
-   const vector=nativeVector(values).mapValue.fields.value.arrayValue.values.map(v=>v.doubleValue);
-   candidates.push({c,d,vector});
+   candidates.push({c,d});
   }
   if(!candidates.length)return {answer:'目前沒有已完成向量化的正式稿。請先匯入並確認儲存，再由管理者手動完成向量化。',sources:[]};
-  const queryTemplate=await readFileImpl(new URL('./prompt-embedding-query.txt',import.meta.url),'utf8');
-  const query=input.history.filter(m=>m.role==='user').map(m=>m.text).concat(input.question).join('\n');
-  const e=await model(MODEL+':embedContent',{model:'models/'+MODEL,content:{parts:[{text:queryTemplate.replace('{{content}}',()=>query)}]},outputDimensionality:DIMENSIONS});
-  const q=nativeVector(e.embedding?.values).mapValue.fields.value.arrayValue.values.map(v=>v.doubleValue);
-  const best=candidates.map(x=>({...x,score:x.vector.reduce((s,v,i)=>s+v*q[i],0)})).sort((a,b)=>b.score-a.score).slice(0,5);
-  const sources=best.map(({c,d},i)=>({id:'S'+(i+1),documentId:c.documentId,title:d.title,text:c.text}));
+  const sources=candidates.map(({c,d},i)=>({id:'S'+(i+1),documentId:c.documentId,title:d.title,text:c.text}));
   const system=await readFileImpl(new URL('./prompt-chat.txt',import.meta.url),'utf8');
   const r=await model('gemini-3.5-flash-lite:generateContent',{systemInstruction:{parts:[{text:system}]},contents:[{role:'user',parts:[{text:JSON.stringify({...input,sources})}]}],generationConfig:{responseMimeType:'application/json',maxOutputTokens:4096}});
   const candidate=r.candidates?.[0];if(candidate?.finishReason!=='STOP')fail('回答尚未完整，請重新提問。');

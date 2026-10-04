@@ -14,7 +14,7 @@ function showPlan(p){
  plan=p;$('plan').hidden=false;$('plan-title').textContent=p.title;
  $('plan-details').textContent=`${labels[p.status]||p.status}｜共 ${p.totalChunks} 段，已完成 ${p.completedChunks} 段，尚餘 ${p.remainingChunks} 段。本次最多 ${Math.min(p.maxChunksPerClick,p.remainingChunks)} 段。`;
  $('plan-usage').textContent=`本批輸入約 ${p.nextInputCharacters} 字元（不是 token 或金額估算）。累計模型請求嘗試：${p.embeddingRequests} 次。`;
- $('vector-confirm').checked=false;$('vector-confirm').disabled=p.remainingChunks===0;$('run-vector').disabled=true;
+ $('vector-confirm').checked=false;$('vector-confirm').disabled=p.remainingChunks===0&&p.searchPublished===true;$('run-vector').textContent=p.remainingChunks?'開始本批向量化':'完成搜尋登錄（不重做向量）';$('run-vector').disabled=true;
 }
 async function load(pageToken=''){
  invalidate();message('正在查詢…');const r=await request('list',{pageToken});const root=$('jobs');root.replaceChildren();
@@ -27,7 +27,7 @@ $('load-jobs').addEventListener('click',()=>perform(()=>load()));
 $('next-page').addEventListener('click',()=>perform(()=>load(nextPage)));
 $('admin-token').addEventListener('input',invalidate);
 $('clear-token').addEventListener('click',()=>{$('admin-token').value='';$('jobs').replaceChildren();$('next-page').hidden=true;invalidate();message('管理碼已清除。');});
-$('vector-confirm').addEventListener('change',()=>{$('run-vector').disabled=!plan||!plan.remainingChunks||!$('vector-confirm').checked;});
+$('vector-confirm').addEventListener('change',()=>{$('run-vector').disabled=!plan||(!plan.remainingChunks&&plan.searchPublished)||!$('vector-confirm').checked;});
 $('run-vector').addEventListener('click',()=>perform(async()=>{
  if(!plan||!$('vector-confirm').checked)throw Error('請先預覽並確認。');const selected=plan;
  $('run-vector').disabled=true;message('正在處理本批，請保持分頁開啟…');

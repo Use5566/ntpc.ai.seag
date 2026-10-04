@@ -1,6 +1,6 @@
 {
   "name": "ntpc-ai-seag",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "type": "module",
   "scripts": { "start": "node server.mjs", "dev": "node dev-server.mjs", "test": "node --test core.test.mjs server.test.mjs storage.test.mjs vectorize.test.mjs chat.test.mjs" },
