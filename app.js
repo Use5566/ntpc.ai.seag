@@ -1,5 +1,5 @@
-import {MAX_CHARS,normalize,termsFrom,redact,segmentsFrom,privacyIssues,secretLike,parseResult,applyAnswers,exportText,STATUS_LABELS,validDate,resolvePrivacy} from './core.js?v=0.4.0';
-import {API_BASE} from './api-config.js?v=0.4.0';
+import {MAX_CHARS,normalize,termsFrom,redact,segmentsFrom,privacyIssues,secretLike,parseResult,applyAnswers,exportText,STATUS_LABELS,validDate,resolvePrivacy} from './core.js?v=0.5.0';
+import {API_BASE} from './api-config.js?v=0.5.0';
 
 const $=id=>document.getElementById(id);
 const state={step:0,maxStep:0,segments:[],result:null,terms:[],answers:{},history:[],dirty:false,taskKey:'',prompts:null};
@@ -142,8 +142,8 @@ bind('confirm-archive','click',async()=>{
   const r=await fetch(`${API_BASE}/api/archive`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`},body:JSON.stringify(input),credentials:'omit',redirect:'error',cache:'no-store',signal:AbortSignal.timeout(180000)});
   const data=await r.json();if(!r.ok){const code=data.code||'';throw new Error(code.startsWith('STORAGE_')?data.error:r.status===401?'存取碼不正確，請重新輸入。':r.status===429?'服務忙碌或已達使用上限，請稍後再試。':'儲存未完成，請保留工作稿並稍後重送。');}
   const a=data.archive;
-  if(!a||!/^https:\/\/drive\.google\.com\/file\/d\/[\w-]+\/view$/.test(a.fileUrl)||a.spreadsheetUrl!=='https://docs.google.com/spreadsheets/d/1lvZLaRW6ULLGXASGBhvIoOOEPsk3nq6iiK0sxUnl77o/edit#gid=0')throw new Error('儲存回覆未通過檢查，請重送確認。');
-  const root=$('archive-receipt');root.replaceChildren(el('p',a.reused?'相同稿件已儲存，沿用既有紀錄。':'TXT 與試算表紀錄均已儲存。'),el('p',`檔名：${a.fileName}`),el('p',`完成時間：${a.savedAt}`));
+  if(!a||!['stored','excluded_system_test'].includes(a.firestore?.status)||!/^https:\/\/drive\.google\.com\/file\/d\/[\w-]+\/view$/.test(a.fileUrl)||a.spreadsheetUrl!=='https://docs.google.com/spreadsheets/d/1lvZLaRW6ULLGXASGBhvIoOOEPsk3nq6iiK0sxUnl77o/edit#gid=0')throw new Error('儲存回覆未通過檢查，請重送確認。');
+  const root=$('archive-receipt');root.replaceChildren(el('p',a.reused?'相同稿件已儲存，沿用既有紀錄。':'TXT、試算表與 Firestore 正式稿均已儲存。'),el('p',a.firestore.status==='stored'?'知識稿已入庫；向量化尚未啟用。':'系統測試資料未納入知識庫。'),el('p',`檔名：${a.fileName}`),el('p',`完成時間：${a.savedAt}`));
   for(const [label,url]of [['開啟 TXT',a.fileUrl],['開啟紀錄表',a.spreadsheetUrl]]){const link=el('a',label);link.href=url;link.target='_blank';link.rel='noopener noreferrer';root.append(link,document.createTextNode('　'));}
   root.hidden=false;$('save-cloud').disabled=true;
   message('儲存完成。原始逐字稿與編輯歷程仍只在本次頁面；需要續編時請另存工作稿。',true);

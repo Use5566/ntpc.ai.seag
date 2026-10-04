@@ -9,7 +9,7 @@
   <title>NTPC AI SEAG-逐字稿整理工具</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
-  <script type="module" src="app.js?v=0.4.0"></script>
+  <script type="module" src="app.js?v=0.5.0"></script>
 </head>
 <body>
   <a class="skip" href="#workspace">跳至編輯區</a>
@@ -25,7 +25,7 @@
         <button data-step="3" class="step" disabled><span class="step-number">03</span><span><strong>檢閱與校訂</strong><small>逐項確認，保留重要細節</small></span></button>
         <button data-step="4" class="step" disabled><span class="step-number">04</span><span><strong>確認與儲存</strong><small>TXT 存檔與紀錄</small></span></button>
       </nav>
-      <div class="sidebar-note">AI：Gemini 3.5 Flash-Lite。確認後儲存至 Google Drive 與試算表。</div>
+      <div class="sidebar-note">AI：Gemini 3.5 Flash-Lite。確認後儲存至 Google Drive、試算表與 Firestore。</div>
     </aside>
     <main id="workspace" tabindex="-1">
       <div class="page-heading"><div><p class="eyebrow" id="step-label">步驟 1 / 4</p><h1 id="page-title">匯入逐字稿</h1><p id="page-description">貼上逐字稿或匯入 UTF-8 文字檔。</p></div><span class="document-status" id="document-status">尚未建立草稿</span></div>
@@ -63,13 +63,13 @@
         <div class="bottom-actions"><button id="save-work" class="secondary">下載工作稿</button><button id="to-final" class="primary">下一步：確認與儲存</button></div><label class="resume-label">繼續先前的工作稿：<input id="resume-file" type="file" accept=".json,application/json"></label>
       </section>
       <section id="panel-4" class="panel" hidden>
-        <div class="card final-card"><h2>正式稿預覽</h2><p>確認送出後，正式稿會存為 TXT，並在指定試算表登記。只儲存已確認的正文及 metadata；原始逐字稿、遮蔽詞彙、未恢復的捨棄內容及回答歷程不會入庫。</p><pre id="final-preview"></pre><label class="check-row"><input type="checkbox" id="final-confirm"><span>我已確認正文、metadata 與補充說明一致，且沒有單位、參與者角色或其他應遮蔽資訊；同意將正式稿存至指定 Google 共用雲端硬碟與試算表。</span></label><div class="button-row"><button id="save-cloud" class="primary" disabled>確認送出並儲存</button><button id="export-txt" class="secondary" disabled>僅下載 TXT 備份</button></div><div id="archive-receipt" role="status" hidden></div><p class="muted">相同內容重送會沿用既有紀錄。修改內容後送出會建立新紀錄；尚未送入 Firebase 或進行向量化。TXT 與紀錄的可見範圍依指定資料夾及試算表的現有共用權限。</p></div><div class="bottom-actions"><button class="secondary" data-back="3">返回修改</button><button id="export-audit" class="secondary">另存去識別編輯紀錄</button></div>
+        <div class="card final-card"><h2>正式稿預覽</h2><p>確認送出後，正式稿會存為 TXT、在指定試算表登記，並寫入 Firestore 知識庫。只儲存已確認的正文及 metadata；原始逐字稿、遮蔽詞彙、未恢復的捨棄內容及回答歷程不會入庫。</p><pre id="final-preview"></pre><label class="check-row"><input type="checkbox" id="final-confirm"><span>我已確認正文、metadata 與補充說明一致，且沒有單位、參與者角色或其他應遮蔽資訊；同意將正式稿存至指定 Google 共用雲端硬碟、試算表與 Firestore。</span></label><div class="button-row"><button id="save-cloud" class="primary" disabled>確認送出並儲存</button><button id="export-txt" class="secondary" disabled>僅下載 TXT 備份</button></div><div id="archive-receipt" role="status" hidden></div><p class="muted">相同內容重送會沿用既有紀錄。修改內容後送出會建立新紀錄；正式稿會寫入 Firestore；向量化尚未啟用。TXT 與紀錄的可見範圍依指定資料夾及試算表的現有共用權限。</p></div><div class="bottom-actions"><button class="secondary" data-back="3">返回修改</button><button id="export-audit" class="secondary">另存去識別編輯紀錄</button></div>
       </section>
       <footer class="page-footer"><button id="reset-button" class="text-button">清除本次內容</button></footer>
     </main>
   </div>
   <dialog id="source-dialog"><div class="dialog-heading"><h2>來源對照</h2><button class="secondary" data-close="source-dialog">關閉</button></div><div id="source-blocks"></div></dialog>
-  <dialog id="help-dialog"><div class="dialog-heading"><h2>使用說明</h2><button class="secondary" data-close="help-dialog">關閉</button></div><ol class="help-list"><li>貼上逐字稿或匯入 UTF-8 TXT。</li><li>選填日期、類型、主題及背景，確認同意傳送內容後開始 AI 整理。</li><li>輸入工具存取碼，開始 AI 整理。尚未完成去識別的內容會經 Render 傳至 Google Gemini；也可手動下載任務與匯入 JSON。</li><li>決定去識別建議，再核對正文、metadata、完全捨棄的內容與問題，完成必要的人工補充。</li><li>確認後按「確認送出並儲存」，將正式稿存為 TXT 並登記至指定試算表。可另外下載 TXT 備份。</li></ol><p>本工具僅在確認送出時儲存正式稿與 metadata 至指定 Google Drive 與試算表，不儲存原始逐字稿、捨棄內容或編輯歷程，也不使用瀏覽器自動儲存或追蹤服務。AI 整理會將送出的內容交給 Render 與 Google Gemini 處理，供應商的保留規則依其服務設定與條款。關閉分頁會失去未下載的內容。可以在檢閱階段下載工作稿，之後使用「匯入工作稿」續編。</p><label class="upload-button" for="resume-file-help">匯入工作稿<input id="resume-file-help" type="file" accept=".json,application/json" class="visually-hidden"></label><p class="muted">API Key 不應貼進逐字稿，也不應提交到 GitHub。Gemini 金鑰只由 Render 後端讀取；測試版使用獨立存取碼驗證。</p></dialog>
+  <dialog id="help-dialog"><div class="dialog-heading"><h2>使用說明</h2><button class="secondary" data-close="help-dialog">關閉</button></div><ol class="help-list"><li>貼上逐字稿或匯入 UTF-8 TXT。</li><li>選填日期、類型、主題及背景，確認同意傳送內容後開始 AI 整理。</li><li>輸入工具存取碼，開始 AI 整理。尚未完成去識別的內容會經 Render 傳至 Google Gemini；也可手動下載任務與匯入 JSON。</li><li>決定去識別建議，再核對正文、metadata、完全捨棄的內容與問題，完成必要的人工補充。</li><li>確認後按「確認送出並儲存」，將正式稿存為 TXT、登記至指定試算表並寫入 Firestore。可另外下載 TXT 備份。</li></ol><p>本工具僅在確認送出時儲存正式稿與 metadata 至指定 Google Drive、試算表與 Firestore，不儲存原始逐字稿、捨棄內容或編輯歷程，也不使用瀏覽器自動儲存或追蹤服務。AI 整理會將送出的內容交給 Render 與 Google Gemini 處理，供應商的保留規則依其服務設定與條款。關閉分頁會失去未下載的內容。可以在檢閱階段下載工作稿，之後使用「匯入工作稿」續編。</p><label class="upload-button" for="resume-file-help">匯入工作稿<input id="resume-file-help" type="file" accept=".json,application/json" class="visually-hidden"></label><p class="muted">API Key 不應貼進逐字稿，也不應提交到 GitHub。Gemini 金鑰只由 Render 後端讀取；測試版使用獨立存取碼驗證。</p></dialog>
   <dialog id="token-dialog"><h2>AI 修訂存取碼</h2><p>請輸入工具存取碼。送出後會將目前草稿、已核對來源及回答交給 Gemini 修訂。</p><label for="revision-token" class="field-label">工具存取碼</label><input id="revision-token" type="password" autocomplete="off" maxlength="256"><div class="button-row"><button class="secondary" data-close="token-dialog">取消</button><button id="confirm-revision" class="primary">開始 AI 修訂</button></div></dialog>
   <dialog id="archive-dialog"><h2>儲存正式稿</h2><p>只送出正式稿及 metadata，不會送出原始逐字稿或捨棄內容。請輸入本次儲存的工具存取碼。</p><label class="field-label" for="archive-token">工具存取碼</label><input id="archive-token" type="password" autocomplete="off" maxlength="256"><div class="button-row"><button class="secondary" data-close="archive-dialog">取消</button><button id="confirm-archive" class="primary">送出儲存</button></div></dialog>
   <dialog id="confirm-dialog"><h2>請確認</h2><p id="confirm-message"></p><div class="button-row"><button id="confirm-cancel" class="secondary">取消</button><button id="confirm-yes" class="primary">確認</button></div></dialog>

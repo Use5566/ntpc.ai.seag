@@ -6,12 +6,24 @@ const privateKey=generateKeyPairSync('rsa',{modulusLength:2048}).privateKey.expo
 const input={title:'自然科評量',body:'以觀察與證據說明作為評量依據。',metadata:{eventDate:'2026-10-04',contentType:'研習整理稿',topics:['自然科'],summary:'評量設計。',limitations:[]},sourceCount:2,confirmed:true};
 const json=x=>new Response(JSON.stringify(x));
 function mock(){
- const state={rows:[HEADERS],files:new Map(),creates:0,appends:0,failUploadReply:false,failComplete:false,folderShared:true,header:HEADERS,empty:false};
+ const state={rows:[HEADERS],files:new Map(),firestore:new Map(),commits:0,failFirestore:false,loseFirestoreReply:false,creates:0,appends:0,failUploadReply:false,failComplete:false,folderShared:true,header:HEADERS,empty:false};
  const fetchImpl=async(url,options={})=>{
   const u=new URL(url);const method=options.method||'GET';
   if(u.hostname==='oauth2.googleapis.com'){const claims=JSON.parse(Buffer.from(options.body.get('assertion').split('.')[1],'base64url'));assert.equal(claims.aud,'https://oauth2.googleapis.com/token');assert.equal(claims.sub,undefined);return json({access_token:'mock-access',expires_in:3600});}
   assert.equal(options.headers.Authorization,'Bearer mock-access');
   assert.ok(!String(options.body).includes(privateKey));
+  if(u.hostname==='firestore.googleapis.com'){
+   if(state.failFirestore)return new Response('{}',{status:403});
+   if(u.pathname.endsWith(':commit')){
+    const writes=JSON.parse(options.body).writes;
+    for(const w of writes){assert.equal(w.currentDocument.exists,false);if(state.firestore.has(w.update.name))return new Response('{}',{status:409});}
+    for(const w of writes)state.firestore.set(w.update.name,w.update);
+    state.commits++;
+    if(state.loseFirestoreReply){state.loseFirestoreReply=false;throw Error('回覆遺失');}
+    return json({writeResults:[{},{}]});
+   }
+   const doc=state.firestore.get(u.pathname.slice(4));return doc?json(doc):new Response('{}',{status:404});
+  }
   if(u.pathname.endsWith('/files/'+FOLDER_ID))return json({id:FOLDER_ID,mimeType:'application/vnd.google-apps.folder',driveId:state.folderShared?'shared':undefined,capabilities:{canAddChildren:true}});
   if(u.hostname==='sheets.googleapis.com'){
    if(!u.pathname.includes('/values/'))return json({sheets:[{properties:{sheetId:0,title:'匯入紀錄',gridProperties:{rowCount:1000,columnCount:26}}}]});
@@ -45,3 +57,21 @@ test('拒絕非共用雲端硬碟、欄位變動及被竄改檔案',async()=>{co
 test('以 RAW 寫入，試算表不執行使用者文字公式',async()=>{const {state,storage}=mock();await storage.save({...input,title:'=IMPORTXML("https://example.com","//a")'});assert.ok(state.rows[1][2].startsWith('=IMPORTXML'));});
 test('單一程序同時送出不重複寫入；系統測試有獨立標記',async()=>{const {storage,state}=mock();const first=storage.save(input,{systemTest:true});await assert.rejects(storage.save(input),{code:'STORAGE_BUSY'});await first;assert.equal(state.rows[1][20],'系統測試');});
 test('憑證缺失時安全失敗，不回傳私密金鑰或原始錯誤',async()=>{const storage=createStorage({readFileImpl:async()=>{throw Error('PRIVATE SECRET');}});await assert.rejects(storage.save(input),e=>e.code==='STORAGE_CONFIG'&&!e.message.includes('PRIVATE SECRET'));});
+test('Firestore 權限失敗保留 TXT，重送後只建立一對稿件與工作紀錄',async()=>{
+ const {state,storage}=mock();state.failFirestore=true;await assert.rejects(storage.save(input),{code:'STORAGE_FIRESTORE'});
+ assert.equal(state.rows[1][17],'待重試');assert.equal(state.creates,1);
+ state.failFirestore=false;const result=await storage.save(input);assert.equal(result.firestore.status,'stored');assert.equal(state.creates,1);assert.equal(state.firestore.size,2);
+ await storage.save(input);assert.equal(state.commits,1);
+});
+test('Firestore 提交回覆遺失可重送，不覆寫工作進度；竄改正文會拒絕',async()=>{
+ const {state,storage}=mock();state.loseFirestoreReply=true;await assert.rejects(storage.save(input),{code:'STORAGE_FIRESTORE'});
+ const job=[...state.firestore.values()].find(x=>x.name.includes('/ingestionJobs/'));job.fields.status={stringValue:'ready'};
+ await storage.save(input);assert.equal(job.fields.status.stringValue,'ready');assert.equal(state.commits,1);
+ const doc=[...state.firestore.values()].find(x=>x.name.includes('/documents/documents/'));doc.fields.body={stringValue:'被修改'};
+ await assert.rejects(storage.save(input),{code:'STORAGE_FIRESTORE_INTEGRITY'});
+});
+test('系統測試永遠不進知識庫；Firestore 只接收正式稿白名單',async()=>{
+ const {state,storage}=mock();const result=await storage.save(input,{systemTest:true});assert.equal(result.firestore.status,'excluded_system_test');await storage.save(input);assert.equal(state.firestore.size,2);assert.ok([...state.firestore.keys()].every(k=>k.includes('/systemCheck')));
+ const m=mock();await m.storage.save(input);const doc=[...m.state.firestore.values()].find(x=>x.name.includes('/documents/documents/'));
+ assert.deepEqual(Object.keys(doc.fields).sort(),['schemaVersion','recordId','contentSha256','title','body','metadata','sourceCount','format','driveFileId','createdAt','toolVersion','humanConfirmed','recordType'].sort());
+});

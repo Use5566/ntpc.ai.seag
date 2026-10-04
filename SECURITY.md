@@ -29,3 +29,10 @@
 - 相同內容指紋、持久化紀錄列與預留 Drive ID 提供重送恢復；不是跨服務原子交易。請保留「待重試」紀錄並重送，不要手動更改紀錄 ID、檔案 ID、指紋、時間或表頭。若人工搬移／修改／刪除 TXT，完整性核對會停止重送。
 - 保持單一實例；多實例、滾動部署同時寫入或外部程式共寫可能造成紀錄競爭，應在日後改用交易資料庫。上線部署時避免進行中的儲存請求。
 
+
+## Firestore 0.5.0
+- 服務帳戶私鑰仍僅置於 Render Secret File，OAuth access token 僅保留後端記憶體。
+- Firestore IAM 與用戶端 Security Rules 分別保護後端及瀏覽器存取；roles/datastore.user 含資料讀寫與刪除能力，不含專案管理，不是集合層級隔離。
+- 固定專案與集合、嚴格正式稿欄位白名單、原子建立與指紋驗證；不儲存原稿、問答、捨棄內容、hostOrganization、participantRoles。
+- 系統測試與知識資料集合分離，未啟用向量化或公開檢索。
+- Firestore 完成不表示 Drive／Sheets 跨服務交易完成；重送用來恢復部分失敗。仍維持單 Render 實例。

@@ -1,11 +1,12 @@
 import {readFile} from 'node:fs/promises';
 import {createHash,createSign,randomUUID} from 'node:crypto';
 import {MAX_CHARS,validDate,privacyIssues,exportText} from './core.js';
+import {persistKnowledge} from './firestore.mjs';
 
 export const FOLDER_ID='1_JvYzPgw25KdYCP0fT_ajpm4sdBwHZJe';
 export const SPREADSHEET_ID='1lvZLaRW6ULLGXASGBhvIoOOEPsk3nq6iiK0sxUnl77o';
 export const SHEET_ID=0;
-export const VERSION='0.4.0';
+export const VERSION='0.5.0';
 export const COLUMNS=[
  ['紀錄編號','依正式稿內容產生的 SHA-256 編號；相同內容重送使用相同紀錄。'],
  ['送出時間（臺北）','伺服器首次接受送出的時間，時區 UTC+08:00。'],
@@ -55,7 +56,7 @@ export function createStorage({env=process.env,fetchImpl=fetch,readFileImpl=read
   if(accessToken&&Date.now()<expires)return accessToken;
   try{credentials??=JSON.parse(await readFileImpl(env.GOOGLE_APPLICATION_CREDENTIALS||'/etc/secrets/google-service-account.json','utf8'));if(credentials.type!=='service_account'||!credentials.client_email?.endsWith('.iam.gserviceaccount.com')||!credentials.private_key)throw Error();}catch{fail('STORAGE_CONFIG','Google 儲存憑證尚未就緒，請管理者檢查 Render Secret File。');}
   const b=x=>Buffer.from(JSON.stringify(x)).toString('base64url');const t=Math.floor(Date.now()/1000);
-  const p=b({alg:'RS256',typ:'JWT'})+'.'+b({iss:credentials.client_email,scope:'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets',aud:'https://oauth2.googleapis.com/token',iat:t,exp:t+3600});
+  const p=b({alg:'RS256',typ:'JWT'})+'.'+b({iss:credentials.client_email,scope:'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/datastore',aud:'https://oauth2.googleapis.com/token',iat:t,exp:t+3600});
   let signature;try{signature=createSign('RSA-SHA256').update(p).sign(credentials.private_key,'base64url');}catch{fail('STORAGE_CONFIG','Google 儲存憑證格式不正確。');}
   const r=await fetchImpl('https://oauth2.googleapis.com/token',{method:'POST',body:new URLSearchParams({grant_type:'urn:ietf:params:oauth:grant-type:jwt-bearer',assertion:p+'.'+signature}),signal:AbortSignal.timeout(20000)});
   if(!r.ok){await r.body?.cancel();fail('STORAGE_AUTH','Google 儲存授權失敗，請檢查服務帳戶。');}
@@ -120,9 +121,15 @@ export function createStorage({env=process.env,fetchImpl=fetch,readFileImpl=read
     file=await api(drive+'/'+id+'?supportsAllDrives=true&fields=id,name,parents,trashed,md5Checksum,webViewLink');
    }
    if(file.trashed||file.name!==row[10]||!file.parents?.includes(FOLDER_ID)||file.md5Checksum!==hash(txt,'md5'))fail('STORAGE_INTEGRITY','TXT 檔案位置或內容與紀錄不一致，請管理者檢查。');
+   if(!['正式資料','系統測試'].includes(row[20]))fail('STORAGE_SCHEMA','紀錄類型不正確，請管理者檢查。');
+   let firestore={status:'excluded_system_test'};
+   {
+    try{firestore=await persistKnowledge({api,record,fileId:id,submittedAt:row[1],toolVersion:row[14],fail,testOnly:row[20]==='系統測試'});}
+    catch(error){if(error instanceof StorageError&&error.code==='STORAGE_FIRESTORE_INTEGRITY')throw error;fail('STORAGE_FIRESTORE','TXT 已保存，但 Firestore 入庫尚未完成；請重送。系統會沿用相同檔案及紀錄。');}
+   }
    const reused=row[17]==='已儲存';row[17]='已儲存';row[18]=row[18]||taipeiTime(now());await put(reservation.range,[row]);
    const verified=(await values(reservation.range))[0];if(verified?.[0]!==record.id||verified?.[17]!=='已儲存')fail('STORAGE_GOOGLE','TXT 已建立，但紀錄仍待確認；請重送。');
-   return {recordId:record.id,fileName:row[10],fileUrl:'https://drive.google.com/file/d/'+id+'/view',spreadsheetUrl:'https://docs.google.com/spreadsheets/d/'+SPREADSHEET_ID+'/edit#gid='+SHEET_ID,savedAt:row[18],reused};
+   return {recordId:record.id,fileName:row[10],fileUrl:'https://drive.google.com/file/d/'+id+'/view',spreadsheetUrl:'https://docs.google.com/spreadsheets/d/'+SPREADSHEET_ID+'/edit#gid='+SHEET_ID,savedAt:row[18],reused,firestore};
   }catch(error){
    if(reservation){try{reservation.row[17]='待重試';await put(reservation.range,[reservation.row]);}catch{}}
    if(error instanceof StorageError)throw error;fail('STORAGE_UNAVAILABLE','儲存連線未完成，請保留工作稿並重送；系統會沿用相同紀錄與檔案編號。');
