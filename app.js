@@ -1,13 +1,13 @@
-import {MAX_CHARS,normalize,termsFrom,redact,segmentsFrom,privacyIssues,secretLike,parseResult,applyAnswers,exportText,STATUS_LABELS,validDate,resolvePrivacy} from './core.js?v=0.3.2';
-import {API_BASE} from './api-config.js?v=0.3.2';
+import {MAX_CHARS,normalize,termsFrom,redact,segmentsFrom,privacyIssues,secretLike,parseResult,applyAnswers,exportText,STATUS_LABELS,validDate,resolvePrivacy} from './core.js?v=0.4.0';
+import {API_BASE} from './api-config.js?v=0.4.0';
 
 const $=id=>document.getElementById(id);
 const state={step:0,maxStep:0,segments:[],result:null,terms:[],answers:{},history:[],dirty:false,taskKey:'',prompts:null};
 const privacyDecisions={};
-const headings=[['匯入逐字稿','貼上逐字稿或匯入 UTF-8 文字檔。'],['去識別確認','檢查標題及正文，移除不應傳送的資訊。'],['AI 整理與去識別建議','同時分析整理內容、識別資訊與待確認問題。'],['檢閱與校訂','核對正文、metadata、捨棄清單與待確認問題。'],['確認與匯出','核對正式稿後，下載純文字檔。']];
+const headings=[['匯入逐字稿','貼上逐字稿或匯入 UTF-8 文字檔。'],['去識別確認','檢查標題及正文，移除不應傳送的資訊。'],['AI 整理與去識別建議','同時分析整理內容、識別資訊與待確認問題。'],['檢閱與校訂','核對正文、metadata、捨棄清單與待確認問題。'],['確認與儲存','核對正式稿後，存為 TXT 並登記紀錄。']];
 function message(text,ok=false){$('message').textContent=text;$('message').classList.toggle('success',ok);$('message').hidden=false;}
 function clearMessage(){$('message').hidden=true;}
-function dirty(){state.dirty=true;$('final-confirm').checked=false;$('export-txt').disabled=true;}
+function dirty(){state.dirty=true;$('final-confirm').checked=false;$('export-txt').disabled=true;$('save-cloud').disabled=true;$('archive-receipt').hidden=true;}
 function go(step){if(step>state.maxStep)return;clearMessage();state.step=step;document.querySelectorAll('.panel').forEach((el,i)=>el.hidden=i!==step);document.querySelectorAll('[data-step]').forEach((el)=>{const i=Number(el.dataset.step);el.disabled=i>state.maxStep;el.classList.toggle('active',i===step);el.classList.toggle('done',i<step);if(i===step)el.setAttribute('aria-current','step');else el.removeAttribute('aria-current');});$('page-title').textContent=headings[step][0];$('page-description').textContent=headings[step][1];$('step-label').textContent=`步驟 ${{0:1,2:2,3:3,4:4}[step]||2} / 4`;$('document-status').textContent=state.result?'人工檢閱中':step>0?'本機工作中':'尚未建立草稿';window.scrollTo({top:0,behavior:'instant'});$('workspace').focus({preventScroll:true});}
 function bind(id,event,fn){$(id).addEventListener(event,async e=>{try{await fn(e);}catch(error){message(error.message||'操作未完成，請再試一次。');}});}
 function assertSafe(text){const issues=privacyIssues(text,state.terms);if(issues.length)throw new Error(issues.join('\n'));}
@@ -66,9 +66,9 @@ bind('import-revision','click',async()=>{const text=$('revision-json').value;par
 bind('save-work','click',()=>{download(safeName(state.result.title)+'_工作稿.json',JSON.stringify(draftPackage(),null,2),'application/json');message('已下載工作稿（包含去識別來源）。關閉前請確認下載成功。',true);});
 bind('resume-file','change',async e=>{if(e.target.files[0])await resume(e.target.files[0]);e.target.value='';});
 bind('resume-file-help','change',async e=>{if(e.target.files[0])await resume(e.target.files[0]);e.target.value='';});
-bind('to-final','click',()=>{validateEdited();if(state.result.questions.length){setTab('questions');throw new Error('尚有待處理問題。請回答並納入人工補充，或匯入釐清後的 AI 修訂稿。');}$('final-preview').textContent=exportText(state.result,state.segments.length);$('final-confirm').checked=false;$('export-txt').disabled=true;state.maxStep=4;go(4);});
-bind('final-confirm','change',()=>{$('export-txt').disabled=!$('final-confirm').checked;});
-bind('export-txt','click',()=>{if(!$('final-confirm').checked)return;validateEdited();if(state.result.questions.length)throw new Error('尚有未處理問題。');download(safeName(state.result.title)+'.txt',$('final-preview').textContent);message('正式稿已下載；尚未送入資料庫，也未向量化。',true);});
+bind('to-final','click',()=>{validateEdited();if(state.result.questions.length){setTab('questions');throw new Error('尚有待處理問題。請回答並納入人工補充，或匯入釐清後的 AI 修訂稿。');}$('final-preview').textContent=exportText(state.result,state.segments.length);$('final-confirm').checked=false;$('export-txt').disabled=true;$('save-cloud').disabled=true;$('archive-receipt').hidden=true;state.maxStep=4;go(4);});
+bind('final-confirm','change',()=>{$('export-txt').disabled=!$('final-confirm').checked;$('save-cloud').disabled=!$('final-confirm').checked;});
+bind('export-txt','click',()=>{if(!$('final-confirm').checked)return;validateEdited();if(state.result.questions.length)throw new Error('尚有未處理問題。');download(safeName(state.result.title)+'.txt',$('final-preview').textContent);message('TXT 備份已下載；下載不會上傳。請按「確認送出並儲存」完成雲端存檔。',true);});
 bind('export-audit','click',()=>{const data=draftPackage();download(safeName(state.result.title)+'_編輯紀錄.json',JSON.stringify(data,null,2),'application/json');message('已另存去識別編輯紀錄。這份紀錄含來源與捨棄內容，請勿當作正式知識稿入庫。',true);});
 bind('reset-button','click',async()=>{if(!await confirmAction('清除目前內容？未下載的草稿將無法復原。'))return;state.dirty=false;location.reload();});
 window.addEventListener('beforeunload',e=>{if(state.dirty){e.preventDefault();e.returnValue='';}});
@@ -124,3 +124,30 @@ bind('apply-privacy','click',()=>{
 });
 
 window.addEventListener('pageshow',()=>{if(state.step===0){const n=$('source-text').value.length;$('source-count').textContent=`${n.toLocaleString()} 字元`;$('to-privacy').disabled=!$('source-text').value.trim()||n>MAX_CHARS;}});
+
+bind('save-cloud','click',()=>{
+ if(!$('final-confirm').checked)throw new Error('請先完成正式稿的人工確認。');
+ validateEdited();if(state.result.questions.length)throw new Error('請先完成待確認問題。');
+ $('archive-token').value='';$('archive-dialog').showModal();
+});
+bind('confirm-archive','click',async()=>{
+ if(!$('final-confirm').checked)throw new Error('請先完成正式稿的人工確認。');
+ validateEdited();if(state.result.questions.length)throw new Error('請先完成待確認問題。');
+ const token=$('archive-token').value.trim();
+ if(token.length<32||token.length>256||secretLike(token))throw new Error('請輸入工具存取碼，不是 Gemini API Key。');
+ const input={title:state.result.title,body:state.result.body,metadata:structuredClone(state.result.metadata),sourceCount:state.segments.length,confirmed:true};
+ $('archive-token').value='';$('archive-dialog').close();document.body.inert=true;
+ message('正在儲存 TXT 與紀錄，請勿關閉分頁。',true);
+ try{
+  const r=await fetch(`${API_BASE}/api/archive`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`},body:JSON.stringify(input),credentials:'omit',redirect:'error',cache:'no-store',signal:AbortSignal.timeout(180000)});
+  const data=await r.json();if(!r.ok){const code=data.code||'';throw new Error(code.startsWith('STORAGE_')?data.error:r.status===401?'存取碼不正確，請重新輸入。':r.status===429?'服務忙碌或已達使用上限，請稍後再試。':'儲存未完成，請保留工作稿並稍後重送。');}
+  const a=data.archive;
+  if(!a||!/^https:\/\/drive\.google\.com\/file\/d\/[\w-]+\/view$/.test(a.fileUrl)||a.spreadsheetUrl!=='https://docs.google.com/spreadsheets/d/1lvZLaRW6ULLGXASGBhvIoOOEPsk3nq6iiK0sxUnl77o/edit#gid=0')throw new Error('儲存回覆未通過檢查，請重送確認。');
+  const root=$('archive-receipt');root.replaceChildren(el('p',a.reused?'相同稿件已儲存，沿用既有紀錄。':'TXT 與試算表紀錄均已儲存。'),el('p',`檔名：${a.fileName}`),el('p',`完成時間：${a.savedAt}`));
+  for(const [label,url]of [['開啟 TXT',a.fileUrl],['開啟紀錄表',a.spreadsheetUrl]]){const link=el('a',label);link.href=url;link.target='_blank';link.rel='noopener noreferrer';root.append(link,document.createTextNode('　'));}
+  root.hidden=false;$('save-cloud').disabled=true;
+  message('儲存完成。原始逐字稿與編輯歷程仍只在本次頁面；需要續編時請另存工作稿。',true);
+ }catch(e){if(e.name==='TimeoutError'||e.name==='AbortError'||e instanceof TypeError)throw new Error('連線未完成，請保留工作稿並重送。系統會核對相同內容，避免重複建檔。');throw e;}
+ finally{document.body.inert=false;}
+});
+$('archive-dialog').addEventListener('close',()=>{$('archive-token').value='';});
