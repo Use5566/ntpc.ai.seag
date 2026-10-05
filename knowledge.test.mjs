@@ -79,3 +79,8 @@ test('混合搜尋中文雙字與課綱代碼可命中；融合去重不全量�
  const row=(name,text)=>({name,fields:{title:{stringValue:''},text:{stringValue:text}}});const a=row('a','其他內容'),b=row('b','ABC-123 評量');
  const result=fuseResults([a,b],[b],'ABC-123 評量');assert.equal(result[0].name,'b');assert.equal(result.length,2);
 });
+
+test('Firestore 欄位重排不影響兩層稿件指紋',()=>{
+ const reorder=x=>Array.isArray(x)?x.map(reorder):x&&typeof x==='object'?Object.fromEntries(Object.entries(x).reverse().map(([k,v])=>[k,reorder(v)])):x;
+ assert.equal(makeRecord(reorder(v2Input)).digest,makeRecord(v2Input).digest);
+});
