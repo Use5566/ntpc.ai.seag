@@ -86,3 +86,17 @@ API：https://ntpc-ai-seag.onrender.com
 部署前以有索引管理權限的帳號執行 setup-vector-index.sh；等索引 READY 再啟用此版。不需擴大日常 Render 服務帳戶 IAM 權限。索引檔 firestore.indexes.json 供 Firebase CLI 使用；shell 腳本含正式 chunks 及隔離 systemCheckChunks 索引。建立索引不呼叫 Gemini。
 
 已完成舊稿的一次性補登：Render Shell 執行 `node migrate-search-ready.mjs`；隔離測試使用 `node migrate-search-ready.mjs --system-test`。只補上搜尋旗標，不呼叫模型、不更動既有向量，且可安全重跑。未完成稿件不補登。
+
+
+## v0.9.0：兩層內容、來源對照、版本、核心 metadata、混合搜尋
+本節取代前面版本對「僅保存正式稿」、「21 欄」及「純向量前 5 段」的描述。
+- 使用者確認後，單一 TXT 分別保存正式整理稿、去識別詳細底稿及來源對照；Firestore v2 documents 保存兩層。底稿不自動向量化、不加入問答上下文；未去識別原稿與編輯歷程不永久保存。
+- 原稿段落為 P 編號，整理稿空白行段落為 S 編號。sourceMap 每筆包含 sectionId、sourceIds、kind；事後補充用 supplement，不偽造逐字來源。修改正文後，變動段落的對照清空，須重新核對。來源對照完整不等於語意已驗證。
+- lineage.documentId 是固定 DOC UUID，version 是整數，previousRecordId 指前版，changeNote 記錄修訂原因。recordId 仍是不可變的內容指紋。documentHeads 保存目前版本；Firestore CAS 與原子提交避免同時覆寫。新版本確認保存時舊版 chunks 退出搜尋；新版需手動向量化。舊版 TXT／documents 不刪除；重送舊版不回退 head。
+- 首頁可輸入任一版本紀錄編號及工具存取碼，載入該文件最新版本修訂。載入、草稿不寫入資料庫；只有確認儲存會建立版本。舊 v1 資料缺少底稿，不會捏造回填；需重新匯入建立完整資料。
+- Metadata v2：eventDate（空白／年／年月／完整日期）、contentType、topics、summary、limitations、domains、gradeBands、usageLicense、visibility、schemaVersion。未知值留空或 []。usageLicense 由使用者確認 internal_knowledge；visibility 僅支援 token_holders，並非個別帳號授權。備份依 Drive／Sheets 共用權限。hostOrganization、participantRoles 仍禁止保存。
+- Sheets 原有 21 欄後追加 10 欄（V:AE）：文件 ID、版本、取代紀錄、修訂說明、領域、年段、授權、可見範圍、metadata 版本、底稿指紋。部署後明確執行 createStorage().initialize()；只接受已知的舊表頭後追加，不覆寫舊列。
+- 混合搜尋：Firestore 原生 COSINE 取 20 段；以 NFKC 小寫拉丁詞／代碼及中文字雙字詞建立雜湊 token 陣列，ARRAY_CONTAINS_ANY 查詢最多 30 個詞，取得最多 100 個關鍵詞候選。候選內以命中詞數排序，再用 RRF (k=60) 融合去重，核對有效版本及原文完整性後選 5 段。這是有候選上限的關鍵詞混合搜尋，不是 BM25，也不保證從全庫取到最佳字詞排名；無全庫掃描或 500 段總量限制。詳細底稿不建關鍵詞索引。
+- 問答來源增加版本及 P 來源編號。引用範圍仍為正式整理稿；不宣稱已驗證論述正確。
+- 部署先建立 setup-hybrid-index.sh 的兩個複合索引並等 READY。既有已完成向量可明確執行 migrate-search-ready.mjs 補建關鍵詞欄位，不呼叫 Embedding；沒有自動觸發或排程。
+- 手動隔離驗收：node verify-v09.mjs --run。只建立 systemChecks 系統測試資料、兩份 TXT 及測試紀錄；會明確呼叫測試 Embedding／回答模型，不進正式搜尋。此指令不在啟動或部署腳本中。

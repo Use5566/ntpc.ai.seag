@@ -17,6 +17,7 @@
     {"id": "Q001", "sourceIds": ["P003"], "question": "請提供者確認的問題", "context": "說明疑點，不能洩漏身分"}
   ],
   "privacyCandidates": [],
+  "sourceMap": [{"sectionId":"S001","sourceIds":["P001"],"kind":"source"}],
   "coverage": [
     {"sourceId": "P001", "status": "retained", "target": "主題一"},
     {"sourceId": "P002", "status": "omitted", "target": "O001"},
@@ -26,3 +27,6 @@
 metadata 不得有 hostOrganization、participantRoles 或 speakers。來源 ID 必須來自輸入；不得捏造。coverage 必須涵蓋全部來源，每個 sourceId 恰好一次。omissions 與 questions 的 id 各自唯一。
 
 privacyCandidates 為必填陣列。每項格式：{"id":"D001","sourceIds":["P001"],"text":"來源中的精確識別文字","replacement":"[識別D001]","reason":"可能識別單位或個人的原因"}。沒有候選用 []。
+
+sourceMap 必填，必須依 body 以空白行分隔的非空段落逐段對應，包含獨立標題段落。依序使用 S001、S002 等編號，每項只有 sectionId、sourceIds、kind。來源內容 kind 為 source，sourceIds 至少一個且必須存在；提供者事後新增且沒有逐字稿依據的內容 kind 為 supplement，sourceIds 為 []。不要用 supplement 規避來源對照。每一段正文都必須有一筆 sourceMap。
+metadata 另需 domains（領域字串陣列）、gradeBands（教材適用年段字串陣列，非參與者身分）、usageLicense（固定空字串，留給使用者確認）、visibility（固定 token_holders）。日期可為 YYYY、YYYY-MM、YYYY-MM-DD 或空字串，不得補猜。

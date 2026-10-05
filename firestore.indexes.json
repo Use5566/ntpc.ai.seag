@@ -1,1 +1,99 @@
-{"indexes":[{"collectionGroup":"chunks","queryScope":"COLLECTION","fields":[{"fieldPath":"recordType","order":"ASCENDING"},{"fieldPath":"configHash","order":"ASCENDING"},{"fieldPath":"searchReady","order":"ASCENDING"},{"fieldPath":"embedding","vectorConfig":{"dimension":1536,"flat":{}}}]},{"collectionGroup":"systemCheckChunks","queryScope":"COLLECTION","fields":[{"fieldPath":"recordType","order":"ASCENDING"},{"fieldPath":"configHash","order":"ASCENDING"},{"fieldPath":"searchReady","order":"ASCENDING"},{"fieldPath":"embedding","vectorConfig":{"dimension":1536,"flat":{}}}]}],"fieldOverrides":[]}
+{
+  "indexes": [
+    {
+      "collectionGroup": "chunks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "recordType",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "configHash",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "searchReady",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "embedding",
+          "vectorConfig": {
+            "dimension": 1536,
+            "flat": {}
+          }
+        }
+      ]
+    },
+    {
+      "collectionGroup": "systemCheckChunks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "recordType",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "configHash",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "searchReady",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "embedding",
+          "vectorConfig": {
+            "dimension": 1536,
+            "flat": {}
+          }
+        }
+      ]
+    },
+    {
+      "collectionGroup": "chunks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "recordType",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "configHash",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "searchReady",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "keywordTokens",
+          "arrayConfig": "CONTAINS"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "systemCheckChunks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "recordType",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "configHash",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "searchReady",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "keywordTokens",
+          "arrayConfig": "CONTAINS"
+        }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

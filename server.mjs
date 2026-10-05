@@ -1,3 +1,4 @@
+import {validateSourceMap} from './knowledge.js';
 import {createChat,ChatError,validateChat} from './chat.mjs';
 import http from 'node:http';
 import {readFile} from 'node:fs/promises';
@@ -18,7 +19,7 @@ export function validateInput(data){
   if(data.source.some((s,i)=>!plain(s)||Object.keys(s).some(k=>!['id','text'].includes(k))||s.id!==`P${String(i+1).padStart(3,'0')}`||typeof s.text!=='string'||!s.text.trim()))fail(400,'來源段落格式不正確。');
   if(data.source.map(s=>s.text).join('\n\n').length>MAX_CHARS)fail(413,'逐字稿超過長度上限。');
   if(secretLike(JSON.stringify(data)))fail(400,'內容疑似包含金鑰或禁止的識別欄位，請先移除。');
-  if(data.metadataHints!==undefined){if(!plain(data.metadataHints)||Object.keys(data.metadataHints).some(k=>!['eventDate','contentType','topics','context'].includes(k))||Object.values(data.metadataHints).some(v=>typeof v!=='string'||v.length>2000))fail(400,'補充資料格式不正確。');}
+  if(data.metadataHints!==undefined){if(!plain(data.metadataHints)||Object.keys(data.metadataHints).some(k=>!['eventDate','contentType','topics','context','domains','gradeBands'].includes(k))||Object.values(data.metadataHints).some(v=>typeof v!=='string'||v.length>2000))fail(400,'補充資料格式不正確。');}
   if(data.mode==='analyze'&&['currentDraft','editorDecisions','previousDecisions'].some(k=>k in data))fail(400,'初次整理不可夾帶修訂資料。');
   if(data.mode==='revise'){
     try{parseResult(JSON.stringify(data.currentDraft),data.source);if(!plain(data.editorDecisions)||!Array.isArray(data.previousDecisions))throw Error();applyAnswers(data.currentDraft,data.editorDecisions);}catch{fail(400,'請先完成每個問題的處理方式與必要說明，再交由 AI 修訂。');}
@@ -53,7 +54,7 @@ export async function createApp({env=process.env,fetchImpl=fetch,now=Date.now,st
     try{
       if(req.url==='/health'&&req.method==='GET'){send(200,{ok:true,version:VERSION});return;}
       const vectorRoute=['/api/vector/list','/api/vector/preview','/api/vector/run'].includes(req.url);
-      if(!vectorRoute&&!['/api/organize','/api/archive','/api/chat'].includes(req.url))fail(404,'找不到此端點。');
+      if(!vectorRoute&&!['/api/organize','/api/archive','/api/chat','/api/document'].includes(req.url))fail(404,'找不到此端點。');
       if(req.headers.origin!==origin)fail(403,'不允許此網站來源。');
       res.setHeader('Access-Control-Allow-Origin',origin);
       if(req.method==='OPTIONS'){res.setHeader('Access-Control-Allow-Methods','POST');res.setHeader('Access-Control-Allow-Headers','Content-Type, Authorization');res.writeHead(204);res.end();return;}
@@ -62,10 +63,11 @@ export async function createApp({env=process.env,fetchImpl=fetch,now=Date.now,st
       if(vectorRoute&&!adminReady)fail(503,'管理者功能尚未設定，請檢查 SEAG_ADMIN_TOKEN。','ADMIN_CONFIG');
       if(!auth.startsWith('Bearer ')||!timingSafeEqual(digest(auth.slice(7)),vectorRoute?adminHash:tokenHash))fail(401,vectorRoute?'管理碼不正確，請重新輸入。':'存取碼不正確，請重新輸入。');
       const body=await jsonBody(req);
-      const input=vectorRoute||req.url==='/api/archive'?body:req.url==='/api/chat'?validateChat(body):validateInput(body);
+      const input=vectorRoute||['/api/archive','/api/document'].includes(req.url)?body:req.url==='/api/chat'?validateChat(body):validateInput(body);
       // Also reject accidental use of the exact server credentials in any input.
       const serialized=JSON.stringify(input);
       if(serialized.includes(key)||serialized.includes(token)||(admin&&serialized.includes(admin)))fail(400,'請移除內容中的憑證。');
+      if(req.url==='/api/archive'&&(!body.sources||body.sourceConfirmed!==true))fail(400,'新版儲存必須附上已確認的去識別底稿與來源對照。');
       const time=now();calls=calls.filter(t=>time-t<86400000);
       if(vectorRoute){
         const action=req.url.split('/').at(-1),keys=action==='list'?['pageToken']:action==='preview'?['documentId']:['documentId','planHash','confirmed'];
@@ -78,6 +80,7 @@ export async function createApp({env=process.env,fetchImpl=fetch,now=Date.now,st
       if(busy)fail(429,'目前已有整理工作，請稍後再試。');
       if(calls.length>=daily||calls.filter(t=>time-t<3600000).length>=hourly)fail(429,'已達本服務的使用上限，請稍後再試。');
       busy=true;calls.push(time);
+      if(req.url==='/api/document'){try{if(!plain(body)||Object.keys(body).join(',')!=='recordId')fail(400,'版本查詢格式不正確。');send(200,{document:await storage.readDocument(body.recordId)});}finally{busy=false;}return;}
       if(req.url==='/api/chat'){try{send(200,{result:await chat.ask(input)});}finally{busy=false;}return;}
       if(vectorRoute){try{send(200,{result:await vector.run(body)});}finally{busy=false;}return;}
       if(req.url==='/api/archive'){
@@ -99,7 +102,7 @@ export async function createApp({env=process.env,fetchImpl=fetch,now=Date.now,st
         if(candidate?.finishReason!=='STOP')fail(502,'AI 未完整產生結果，請縮短逐字稿後再試。','RESULT_INCOMPLETE');
         const output=(candidate.content?.parts||[]).filter(p=>!p.thought).map(p=>p.text||'').join('');
         if(output.includes(key)||output.includes(token)||(admin&&output.includes(admin)))fail(502,'AI 回應未通過安全檢查。');
-        let result;try{if(!Array.isArray(JSON.parse(output).privacyCandidates))throw Error();result=parseResult(output,input.source);}catch{fail(502,'AI 結果未通過格式、來源完整性或去識別檢查。原稿仍保留，請稍後重試或拆分內容。','RESULT_INVALID');}
+        let result;try{if(!Array.isArray(JSON.parse(output).privacyCandidates))throw Error();result=parseResult(output,input.source);validateSourceMap(result.body,result.sourceMap,input.source);}catch{fail(502,'AI 結果未通過格式、來源完整性或去識別檢查。原稿仍保留，請稍後重試或拆分內容。','RESULT_INVALID');}
         send(200,{result});
       }finally{clearTimeout(timer);res.off('close',disconnect);busy=false;}
     }catch(error){const known=error instanceof HttpError||error instanceof StorageError||error instanceof VectorError||error instanceof ChatError;send(known?error.status:503,{error:known?error.message:'服務暫時無法完成或已逾時，原稿仍保留，請稍後重試。',code:known?error.code:'SERVICE_TIMEOUT'});}

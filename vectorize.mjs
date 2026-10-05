@@ -1,7 +1,9 @@
 import {createHash,randomUUID} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import {FIRESTORE_ROOT,firestoreFields,fromFirestore} from './firestore.mjs';
-import {makeRecord} from './storage.mjs';
+import {keywordTokens} from './hybrid.mjs';
+import {isCurrent} from './revisions.mjs';
+import {makeRecord,recordInput} from './storage.mjs';
 export const MODEL='gemini-embedding-2',DIMENSIONS=1536,BATCH_SIZE=3;
 export class VectorError extends Error{constructor(code,message,status=503){super(message);this.code=code;this.status=status;}}
 const fail=(code,message,status)=>{throw new VectorError(code,message,status);};
@@ -39,15 +41,16 @@ export function createVectorizer({api,env=process.env,fetchImpl=fetch,now=Date.n
   if(!raw||!job)fail('VECTOR_MISSING','找不到正式稿或處理紀錄。',404);
   const d=decode(raw),j=decode(job);
   if(d.recordType!==(testOnly?'system_test':'knowledge')||d.humanConfirmed!==true)fail('VECTOR_INPUT','只處理經人工確認的正式稿。',400);
-  let record;try{record=makeRecord({title:d.title,body:d.body,metadata:d.metadata,sourceCount:d.sourceCount,confirmed:true});}catch{fail('VECTOR_INTEGRITY','稿件格式不正確，請管理者檢查。');}
+  let record;try{record=makeRecord(recordInput(d));}catch{fail('VECTOR_INTEGRITY','稿件格式不正確，請管理者檢查。');}
   if(record.id!==id||record.digest!==d.contentSha256||j.contentSha256!==record.digest||j.documentId!==id)fail('VECTOR_INTEGRITY','稿件內容與指紋不一致，未呼叫向量模型。');
+  if(!await isCurrent(api,d,testOnly))fail('VECTOR_VERSION','此版本已被取代，請選擇最新版本。',409);
   const cfg=await config(),parts=splitText(d.body);
   if(j.configHash&&j.configHash!==cfg.configHash)fail('VECTOR_VERSION','向量設定已變更，請先規劃重新建立索引，避免混用版本。',409);
   const completed=j.completedChunks||0;
   if(!Number.isSafeInteger(completed)||completed<0||completed>parts.length)fail('VECTOR_INTEGRITY','處理進度不正確。');
   return {d,j,raw,job,parts,completed,...cfg,planHash:hash(id+cfg.configHash)};
  }
- const summary=p=>({documentId:p.d.recordId,title:p.d.title,model:MODEL,dimensions:DIMENSIONS,totalChunks:p.parts.length,completedChunks:p.completed,remainingChunks:p.parts.length-p.completed,maxChunksPerClick:BATCH_SIZE,nextInputCharacters:p.parts.slice(p.completed,p.completed+BATCH_SIZE).reduce((n,c)=>n+[...c.text].length+[...p.d.title].length+p.template.length,0),planHash:p.planHash,status:p.j.status,attempts:p.j.attempts||0,embeddingRequests:p.j.embeddingRequests||0,searchPublished:p.j.searchPublished===true});
+ const summary=p=>({documentId:p.d.recordId,title:p.d.title,model:MODEL,dimensions:DIMENSIONS,totalChunks:p.parts.length,completedChunks:p.completed,remainingChunks:p.parts.length-p.completed,maxChunksPerClick:BATCH_SIZE,nextInputCharacters:p.parts.slice(p.completed,p.completed+BATCH_SIZE).reduce((n,c)=>n+[...c.text].length+[...p.d.title].length+p.template.length,0),planHash:p.planHash,status:p.j.status,attempts:p.j.attempts||0,embeddingRequests:p.j.embeddingRequests||0,searchPublished:p.j.searchPublished===true&&p.j.lexicalVersion==='bigrams_v1'});
  async function list({pageToken=''}={}){
   if(typeof pageToken!=='string'||pageToken.length>3000)fail('VECTOR_INPUT','分頁資訊不正確。',400);
   const r=await api(FIRESTORE_ROOT+'/'+jobs+'?pageSize=20'+(pageToken?'&pageToken='+encodeURIComponent(pageToken):''));
@@ -63,7 +66,8 @@ export function createVectorizer({api,env=process.env,fetchImpl=fetch,now=Date.n
  // Publish all chunks atomically only after the entire document is complete.
  async function publish(p){
   if(p.completed!==p.parts.length)fail('VECTOR_INTEGRITY','尚未完成的稿件不可開放查詢。');
-  if(p.j.searchPublished===true)return;
+  if(p.j.searchPublished===true&&p.j.lexicalVersion==='bigrams_v1')return;
+  if(!await isCurrent(api,p.d,testOnly))fail('VECTOR_VERSION','此版本已被取代。',409);
   const writes=[];
   for(let index=0;index<p.parts.length;index++){
    const id=p.d.recordId+'_'+p.configHash.slice(0,16)+'_'+String(index).padStart(4,'0');
@@ -72,9 +76,9 @@ export function createVectorizer({api,env=process.env,fetchImpl=fetch,now=Date.n
    const {embedding,...fields}=raw.fields;const c=decode({fields}),part=p.parts[index];
    if(c.documentId!==p.d.recordId||c.configHash!==p.configHash||c.contentSha256!==p.d.contentSha256||c.text!==part.text||c.index!==index||c.start!==part.start||c.end!==part.end)fail('VECTOR_INTEGRITY','向量段落不一致，未開放查詢。');
    nativeVector(embedding?.mapValue?.fields?.value?.arrayValue?.values?.map(v=>v.doubleValue??Number(v.integerValue)));
-   writes.push({update:{name:raw.name,fields:{searchReady:{booleanValue:true}}},updateMask:{fieldPaths:['searchReady']},currentDocument:{updateTime:raw.updateTime}});
+   writes.push({update:{name:raw.name,fields:firestoreFields({searchReady:true,keywordTokens:keywordTokens(p.d.title+' '+part.text)})},updateMask:{fieldPaths:['searchReady','keywordTokens']},currentDocument:{updateTime:raw.updateTime}});
   }
-  await updateJob(p,{...p.j,status:'ready',searchPublished:true},writes);
+  await updateJob(p,{...p.j,status:'ready',searchPublished:true,lexicalVersion:'bigrams_v1'},writes);
  }
  async function publishExisting({documentId}){const p=await load(documentId);if(p.j.status!=='ready')fail('VECTOR_INPUT','只可補登已完成的稿件。',400);await publish(p);return {documentId,published:true};}
  async function run({documentId,planHash,confirmed}){

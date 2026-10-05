@@ -2,7 +2,10 @@ import {readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {FIRESTORE_ROOT,fromFirestore} from './firestore.mjs';
 import {MODEL,DIMENSIONS,nativeVector} from './vectorize.mjs';
-import {makeRecord} from './storage.mjs';
+import {queryTokens,fuseResults} from './hybrid.mjs';
+import {bodySections} from './knowledge.js';
+import {isCurrent} from './revisions.mjs';
+import {makeRecord,recordInput} from './storage.mjs';
 import {secretLike} from './core.js';
 export class ChatError extends Error{constructor(message,status=503){super(message);this.status=status;this.code='CHAT_FAILED';}}
 const fail=(m,s)=>{throw new ChatError(m,s);};
@@ -32,9 +35,13 @@ export function createChat({api,env=process.env,fetchImpl=fetch,readFileImpl=rea
   const e=await model(MODEL+':embedContent',{model:'models/'+MODEL,content:{parts:[{text:queryTemplate.replace('{{content}}',()=>query)}]},outputDimensionality:DIMENSIONS});
   const queryVector=nativeVector(e.embedding?.values);
   let response;
-  try{response=await api(FIRESTORE_ROOT+':runQuery',{method:'POST',json:{structuredQuery:{from:[{collectionId:collection}],where,findNearest:{vectorField:{fieldPath:'embedding'},queryVector,distanceMeasure:'COSINE',limit:5}}}});}catch{fail('原生向量查詢未完成，請確認 Firestore 向量索引已就緒及服務帳戶查詢權限。');}
+  try{response=await api(FIRESTORE_ROOT+':runQuery',{method:'POST',json:{structuredQuery:{from:[{collectionId:collection}],where,findNearest:{vectorField:{fieldPath:'embedding'},queryVector,distanceMeasure:'COSINE',limit:20}}}});}catch{fail('原生向量查詢未完成，請確認 Firestore 向量索引已就緒及服務帳戶查詢權限。');}
   if(!Array.isArray(response))fail('知識搜尋回覆格式不正確。');
-  const rows=response.filter(r=>r.document).map(r=>r.document);
+  const vectorRows=response.filter(r=>r.document).map(r=>r.document),tokens=queryTokens(input.question);
+  let lexical=[];
+  if(tokens.length){try{lexical=await api(FIRESTORE_ROOT+':runQuery',{method:'POST',json:{structuredQuery:{from:[{collectionId:collection}],where:{compositeFilter:{op:'AND',filters:[...where.compositeFilter.filters,{fieldFilter:{field:{fieldPath:'keywordTokens'},op:'ARRAY_CONTAINS_ANY',value:{arrayValue:{values:tokens.map(t=>({stringValue:t}))}}}}]}},limit:100}}});}catch{fail('關鍵詞索引查詢未完成，請確認混合搜尋索引已就緒。');}}
+  if(!Array.isArray(lexical))fail('關鍵詞搜尋格式不正確。');
+  const rows=fuseResults(vectorRows,lexical.filter(r=>r.document).map(r=>r.document),input.question,120);
   const candidates=[],cache=new Map();
   for(const raw of rows){
    const {embedding,...fields}=raw.fields;const c=decode({fields});
@@ -42,15 +49,16 @@ export function createChat({api,env=process.env,fetchImpl=fetch,readFileImpl=rea
    if(!cache.has(c.documentId)){
     const j=await api(FIRESTORE_ROOT+'/'+jobs+'/'+c.documentId,{allow404:true});
     const job=j&&decode(j);let doc=null;
-    if(job?.status==='ready'&&job.configHash===configHash){const d=await api(FIRESTORE_ROOT+'/'+docs+'/'+c.documentId,{allow404:true});doc=d&&decode(d);if(doc){const record=makeRecord({...Object.fromEntries(['title','body','metadata','sourceCount'].map(k=>[k,doc[k]])),confirmed:true});if(doc.recordType!==type||doc.humanConfirmed!==true||record.id!==c.documentId||record.digest!==doc.contentSha256)fail('知識稿完整性檢查失敗。');}}
+    if(job?.status==='ready'&&job.configHash===configHash){const d=await api(FIRESTORE_ROOT+'/'+docs+'/'+c.documentId,{allow404:true});doc=d&&decode(d);if(doc){const record=makeRecord(recordInput(doc));if(doc.recordType!==type||doc.humanConfirmed!==true||record.id!==c.documentId||record.digest!==doc.contentSha256)fail('知識稿完整性檢查失敗。');}}
+    if(doc&&!await isCurrent(api,doc,testOnly))doc=null;
     cache.set(c.documentId,doc);
    }
    const d=cache.get(c.documentId);if(!d)continue;
    if(c.contentSha256!==d.contentSha256||!Number.isInteger(c.start)||!Number.isInteger(c.end)||c.start<0||c.end<=c.start||[...d.body].slice(c.start,c.end).join('')!==c.text)fail('知識段落完整性檢查失敗。');
-   candidates.push({c,d});
+   candidates.push({c,d});if(candidates.length===5)break;
   }
   if(!candidates.length)return {answer:'目前沒有已完成向量化的正式稿。請先匯入並確認儲存，再由管理者手動完成向量化。',sources:[]};
-  const sources=candidates.map(({c,d},i)=>({id:'S'+(i+1),documentId:c.documentId,title:d.title,text:c.text}));
+  const sources=candidates.map(({c,d},i)=>({id:'S'+(i+1),documentId:c.documentId,title:d.title,text:c.text,...(d.format==='seag_text_v2'?{version:d.lineage.version,logicalDocumentId:d.lineage.documentId,sourceIds:[...new Set(d.sourceMap.filter(m=>{const s=bodySections(d.body).find(x=>x.sectionId===m.sectionId);return s&&s.start<c.end&&s.end>c.start;}).flatMap(m=>m.sourceIds))]}:{})}));
   const system=await readFileImpl(new URL('./prompt-chat.txt',import.meta.url),'utf8');
   const r=await model('gemini-3.5-flash-lite:generateContent',{systemInstruction:{parts:[{text:system}]},contents:[{role:'user',parts:[{text:JSON.stringify({...input,sources})}]}],generationConfig:{responseMimeType:'application/json',maxOutputTokens:4096}});
   const candidate=r.candidates?.[0];if(candidate?.finishReason!=='STOP')fail('回答尚未完整，請重新提問。');

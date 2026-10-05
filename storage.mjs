@@ -1,12 +1,14 @@
 import {readFile} from 'node:fs/promises';
 import {createHash,createSign,randomUUID} from 'node:crypto';
 import {MAX_CHARS,validDate,privacyIssues,exportText} from './core.js';
+import {partialDate,validateSourceMap,archiveExtras,layeredText,META_VERSION} from './knowledge.js';
+import {revisionPlan,readCurrentDocument} from './revisions.mjs';
 import {persistKnowledge} from './firestore.mjs';
 
 export const FOLDER_ID='1_JvYzPgw25KdYCP0fT_ajpm4sdBwHZJe';
 export const SPREADSHEET_ID='1lvZLaRW6ULLGXASGBhvIoOOEPsk3nq6iiK0sxUnl77o';
 export const SHEET_ID=0;
-export const VERSION='0.8.0';
+export const VERSION='0.9.0';
 export const COLUMNS=[
  ['紀錄編號','依正式稿內容產生的 SHA-256 編號；相同內容重送使用相同紀錄。'],
  ['送出時間（臺北）','伺服器首次接受送出的時間，時區 UTC+08:00。'],
@@ -14,9 +16,9 @@ export const COLUMNS=[
  ['活動日期','YYYY-MM-DD；未確認時留空。'],
  ['資料類型','例如研習逐字稿；由提供者確認。'],
  ['主題／關鍵詞','以換行分隔。'],
- ['整體摘要','提供者確認後的摘要；不存原始逐字稿。'],
+ ['整體摘要','提供者確認後的摘要；詳細底稿另存於 TXT 與 Firestore。'],
  ['內容限制','不確定事項與使用限制，以換行分隔。'],
- ['來源段落數','只記錄數量，不儲存來源文字。'],
+ ['來源段落數','去識別底稿的段落數；詳細文字另存於 TXT 與 Firestore。'],
  ['正文字元數','整理正文的 Unicode 字元數。'],
  ['TXT 檔名','活動日期或日期未確認＋中性標題＋紀錄指紋前 12 碼。'],
  ['Drive 檔案 ID','預先保留的檔案 ID，用於中斷後安全重試。'],
@@ -28,7 +30,8 @@ export const COLUMNS=[
  ['儲存狀態','處理中／待重試／已儲存；已儲存表示 TXT 和紀錄都完成。'],
  ['完成時間（臺北）','TXT 與紀錄都完成的時間。'],
  ['TXT SHA-256','實際 UTF-8 TXT 檔案的完整性指紋。'],
- ['紀錄類型','正式資料／系統測試；系統測試不應納入知識庫。']
+ ['紀錄類型','正式資料／系統測試；系統測試不應納入知識庫。'],
+ ['固定文件 ID','同一份文件跨版本不變。'],['版本','從 1 開始；修訂須以前一版本為基礎。'],['取代版本紀錄','前一版本的 SEAG 紀錄 ID；空白表示初版。'],['修訂說明','提供者確認的修改說明。'],['領域','教材領域，每行一項；未知留空。'],['適用年段','教材適用範圍，不是參與者身分。'],['使用授權','internal_knowledge：內部知識庫整理、保存與問答。'],['問答可見範圍','token_holders：工具存取碼持有者；Drive 權限另行繼承。'],['Metadata 版本','seag_metadata_v2。'],['底稿 SHA-256','去識別底稿的完整性指紋；正文與底稿一起保存在 TXT。']
 ];
 export const HEADERS=COLUMNS.map(c=>c[0]);
 export class StorageError extends Error{constructor(code,message,status=503){super(message);this.code=code;this.status=status;}}
@@ -38,14 +41,26 @@ const hash=(text,algorithm='sha256')=>createHash(algorithm).update(text).digest(
 const exact=(x,keys)=>object(x)&&Object.keys(x).length===keys.length&&keys.every(k=>Object.hasOwn(x,k));
 const clean=(v,max,required=false)=>typeof v==='string'&&v.length<=max&&(!required||!!v.trim())&&!/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(v);
 export function validateSubmission(input){
- if(!exact(input,['title','body','metadata','sourceCount','confirmed'])||input.confirmed!==true||!clean(input.title,180,true)||!clean(input.body,MAX_CHARS,true)||!Number.isInteger(input.sourceCount)||input.sourceCount<1||input.sourceCount>3000)fail('STORAGE_INPUT','請確認正式稿、來源段落數與人工確認狀態。',400);
+ const v2=Object.hasOwn(input||{},'sources');
+ if(!exact(input,v2?['title','body','metadata','sourceCount','confirmed','sources','sourceMap','lineage','sourceConfirmed']:['title','body','metadata','sourceCount','confirmed'])||input.confirmed!==true||!clean(input.title,180,true)||!clean(input.body,MAX_CHARS,true)||!Number.isInteger(input.sourceCount)||input.sourceCount<1||input.sourceCount>3000)fail('STORAGE_INPUT','請確認正式稿、來源段落數與人工確認狀態。',400);
  const m=input.metadata;
- if(!exact(m,['eventDate','contentType','topics','summary','limitations'])||!validDate(m.eventDate)||!clean(m.eventDate,10)||!clean(m.contentType,120,true)||!clean(m.summary,20000)||!['topics','limitations'].every(k=>Array.isArray(m[k])&&m[k].length<=100&&m[k].every(v=>clean(v,2000,true))&&m[k].join('\n').length<=20000))fail('STORAGE_INPUT','Metadata 格式不正確或內容過長。',400);
+ if(!exact(m,v2?['eventDate','contentType','topics','summary','limitations','domains','gradeBands','usageLicense','visibility','schemaVersion']:['eventDate','contentType','topics','summary','limitations'])||!(v2?partialDate(m.eventDate):validDate(m.eventDate))||!clean(m.eventDate,10)||!clean(m.contentType,120,true)||!clean(m.summary,20000)||!['topics','limitations'].every(k=>Array.isArray(m[k])&&m[k].length<=100&&m[k].every(v=>clean(v,2000,true))&&m[k].join('\n').length<=20000))fail('STORAGE_INPUT','Metadata 格式不正確或內容過長。',400);
  if(privacyIssues(JSON.stringify(input)).length||/"(?:private_key|private_key_id|client_secret)"\s*:/i.test(JSON.stringify(input)))fail('STORAGE_INPUT','正式稿含有禁止欄位或疑似憑證，請移除。',400);
+ if(v2){
+  if(input.sourceConfirmed!==true||!Array.isArray(input.sources)||input.sources.length!==input.sourceCount||input.sources.some((p,i)=>!exact(p,['id','text'])||p.id!==`P${String(i+1).padStart(3,'0')}`||!clean(p.text,MAX_CHARS,true))||input.sources.map(p=>p.text).join('\n\n').length>MAX_CHARS)fail('STORAGE_INPUT','請確認去識別詳細底稿與來源編號。',400);
+  try{validateSourceMap(input.body,input.sourceMap,input.sources);}catch(e){fail('STORAGE_INPUT',e.message,400);}
+  if(m.schemaVersion!==META_VERSION||m.usageLicense!=='internal_knowledge'||m.visibility!=='token_holders'||!['domains','gradeBands'].every(k=>Array.isArray(m[k])&&m[k].length<=30&&m[k].every(v=>clean(v,120,true))))fail('STORAGE_INPUT','請確認領域、適用年段及內部知識庫使用授權。',400);
+  const l=input.lineage;
+  if(!exact(l,['documentId','version','previousRecordId','changeNote'])||!/^DOC-[a-f0-9-]{36}$/.test(l.documentId)||!Number.isSafeInteger(l.version)||l.version<1||l.version>100000||!(l.version===1?l.previousRecordId==='':/^SEAG-[a-f0-9]{64}$/.test(l.previousRecordId))||!clean(l.changeNote,1000,true))fail('STORAGE_INPUT','文件版本資料不正確。',400);
+  if(Buffer.byteLength(JSON.stringify(input),'utf8')>800000)fail('STORAGE_INPUT','兩層內容及對照超過安全儲存大小，請拆分文件。',400);
+  return {title:input.title.trim(),body:input.body,metadata:{eventDate:m.eventDate,contentType:m.contentType.trim(),topics:[...m.topics],summary:m.summary,limitations:[...m.limitations],domains:[...m.domains],gradeBands:[...m.gradeBands],usageLicense:m.usageLicense,visibility:m.visibility,schemaVersion:META_VERSION},sourceCount:input.sourceCount,format:'seag_text_v2',sources:input.sources.map(p=>({...p})),sourceMap:input.sourceMap.map(p=>({...p,sourceIds:[...p.sourceIds]})),lineage:{...l},sourceConfirmed:true};
+ }
  // Explicit projection excludes raw sources, questions, omitted text and identities.
  return {title:input.title.trim(),body:input.body,metadata:{eventDate:m.eventDate,contentType:m.contentType.trim(),topics:[...m.topics],summary:m.summary,limitations:[...m.limitations]},sourceCount:input.sourceCount,format:'seag_text_v1'};
 }
-export function makeRecord(input){const document=validateSubmission(input);const digest=hash(JSON.stringify(document));return {document,digest,id:'SEAG-'+digest,filename:(document.metadata.eventDate.replaceAll('-','')||'日期未確認')+'_'+(document.title.normalize('NFKC').replace(/[<>:"/\\|?*\u0000-\u001f]/g,'_').replace(/[. ]+$/g,'').slice(0,50)||'知識整理稿')+'_'+digest.slice(0,12)+'.txt'};}
+export function makeRecord(input){const document=validateSubmission(input);const digest=hash(JSON.stringify(document));return {document,digest,id:'SEAG-'+digest,filename:(document.metadata.eventDate.replaceAll('-','')||'日期未確認')+'_'+(document.title.normalize('NFKC').replace(/[<>:"/\\|?*\u0000-\u001f]/g,'_').replace(/[. ]+$/g,'').slice(0,50)||'知識整理稿')+(document.lineage?'_v'+document.lineage.version:'')+'_'+digest.slice(0,12)+'.txt'};}
+export const recordInput=d=>({title:d.title,body:d.body,metadata:d.metadata,sourceCount:d.sourceCount,confirmed:true,...archiveExtras(d)});
+const archiveText=(d,date)=>exportText(d,d.sourceCount,date).replace('格式版本：seag_text_v1','格式版本：'+d.format)+layeredText(d);
 export const taipeiTime=date=>new Date(new Date(date).getTime()+8*3600000).toISOString().replace('Z','+08:00');
 
 export function createStorage({env=process.env,fetchImpl=fetch,readFileImpl=readFile,now=()=>new Date()}={}){
@@ -72,16 +87,22 @@ export function createStorage({env=process.env,fetchImpl=fetch,readFileImpl=read
   const folder=await api(drive+'/'+FOLDER_ID+'?supportsAllDrives=true&fields=id,mimeType,driveId,capabilities(canAddChildren)');
   if(folder.mimeType!=='application/vnd.google-apps.folder'||!folder.driveId||folder.capabilities?.canAddChildren!==true)fail('STORAGE_FOLDER','目標必須是具有寫入權限的共用雲端硬碟資料夾。');
   const meta=await api(sheets+'?fields=sheets(properties)');const sheet=meta.sheets?.find(s=>s.properties.sheetId===SHEET_ID)?.properties;
-  if(!sheet||sheet.gridProperties.columnCount<HEADERS.length)fail('STORAGE_SCHEMA','找不到紀錄工作表，請管理者先完成欄位設定。');
+  if(!sheet||sheet.gridProperties.columnCount<21)fail('STORAGE_SCHEMA','找不到紀錄工作表，請管理者先完成欄位設定。');
   const range="'"+sheet.title.replaceAll("'","''")+"'!";
   return {folder,sheet,range};
  }
  const values=async range=>(await api(sheets+'/values/'+encodeURIComponent(range)+'?valueRenderOption=UNFORMATTED_VALUE')).values||[];
  const put=async(range,rows)=>api(sheets+'/values/'+encodeURIComponent(range)+'?valueInputOption=RAW',{method:'PUT',json:{values:rows}});
- async function checkHeaders(range){if(JSON.stringify((await values(range+'A1:U1'))[0])!==JSON.stringify(HEADERS))fail('STORAGE_SCHEMA','紀錄表欄位已變動，請管理者核對欄位後再送出。');}
+ async function checkHeaders(range){if(JSON.stringify((await values(range+'A1:AE1'))[0])!==JSON.stringify(HEADERS))fail('STORAGE_SCHEMA','紀錄表欄位已變動，請管理者核對欄位後再送出。');}
  async function initialize(){
-  const {sheet,range}=await context();const existing=await values(range+'A1:U1');
-  if(existing.length){await checkHeaders(range);return {alreadyInitialized:true};}
+  const {sheet,range}=await context();const existing=await values(range+'A1:AE1');
+  if(existing.length){
+   if(JSON.stringify(existing[0])===JSON.stringify(HEADERS)){return {alreadyInitialized:true};}
+   if(JSON.stringify(existing[0])!==JSON.stringify(HEADERS.slice(0,21)))fail('STORAGE_SCHEMA','既有表頭不符合已知版本，未修改。');
+   if(sheet.gridProperties.columnCount<HEADERS.length)await api(sheets+':batchUpdate',{method:'POST',json:{requests:[{appendDimension:{sheetId:SHEET_ID,dimension:'COLUMNS',length:HEADERS.length-sheet.gridProperties.columnCount}}]}});
+   await put(range+'V1:AE1',[HEADERS.slice(21)]);await checkHeaders(range);return {upgraded:true,columns:HEADERS.length};
+  }
+  if(sheet.gridProperties.columnCount<HEADERS.length)await api(sheets+':batchUpdate',{method:'POST',json:{requests:[{appendDimension:{sheetId:SHEET_ID,dimension:'COLUMNS',length:HEADERS.length-sheet.gridProperties.columnCount}}]}});
   // Never replace a pre-existing table or hidden content.
   for(let start=1;start<=sheet.gridProperties.rowCount;start+=500){if((await values(range+`A${start}:Z${Math.min(start+499,sheet.gridProperties.rowCount)}`)).some(row=>row.some(v=>v!=='')))fail('STORAGE_SCHEMA','工作表已有內容；未修改，請管理者另行指定空白工作表。');}
   await api(sheets+':batchUpdate',{method:'POST',json:{requests:[
@@ -99,19 +120,20 @@ export function createStorage({env=process.env,fetchImpl=fetch,readFileImpl=read
   if(locked)fail('STORAGE_BUSY','目前有儲存工作進行中，請稍後重送。',429);
   locked=true;let reservation;
   try{
+   await revisionPlan(api,record,fail,systemTest);
    const {sheet,range}=await context();await checkHeaders(range);
    // A single Render instance serializes writers. The durable row is the retry journal.
-   for(let start=2;start<=sheet.gridProperties.rowCount;start+=500){const rows=await values(range+`A${start}:A${Math.min(start+499,sheet.gridProperties.rowCount)}`);const index=rows.findIndex(row=>row[0]===record.id);if(index>=0){const rowNumber=start+index;const row=(await values(range+`A${rowNumber}:U${rowNumber}`))[0];reservation={range:range+`A${rowNumber}:U${rowNumber}`,row};break;}}
+   for(let start=2;start<=sheet.gridProperties.rowCount;start+=500){const rows=await values(range+`A${start}:A${Math.min(start+499,sheet.gridProperties.rowCount)}`);const index=rows.findIndex(row=>row[0]===record.id);if(index>=0){const rowNumber=start+index;const row=(await values(range+`A${rowNumber}:AE${rowNumber}`))[0];reservation={range:range+`A${rowNumber}:AE${rowNumber}`,row};break;}}
    if(!reservation){
     const generated=await api(drive+'/generateIds?count=1&space=drive&type=files');const id=generated.ids?.[0];if(!/^[\w-]+$/.test(id||''))fail('STORAGE_GOOGLE','無法建立檔案編號。');
-    const submitted=taipeiTime(now());const {document:d}=record;const txt='\uFEFF'+exportText(d,d.sourceCount,submitted);
-    const row=[record.id,submitted,d.title,d.metadata.eventDate,d.metadata.contentType,d.metadata.topics.join('\n'),d.metadata.summary,d.metadata.limitations.join('\n'),d.sourceCount,[...d.body].length,record.filename,id,'https://drive.google.com/file/d/'+id+'/view',record.digest,VERSION,d.format,'已確認','處理中','',hash(txt),systemTest?'系統測試':'正式資料'];
-    const appended=await api(sheets+'/values/'+encodeURIComponent(range+'A1:U1')+':append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{method:'POST',json:{values:[row]}});
-    const updated=appended.updates?.updatedRange;const match=typeof updated==='string'&&updated.match(/!A([1-9]\d*):U([1-9]\d*)$/);if(!match||match[1]!==match[2]||Number(match[1])<2)fail('STORAGE_GOOGLE','紀錄已送出，請重送以確認儲存狀態。');reservation={range:range+'A'+match[1]+':U'+match[1],row};
+    const submitted=taipeiTime(now());const {document:d}=record;const txt='\uFEFF'+archiveText(d,submitted);
+    const row=[record.id,submitted,d.title,d.metadata.eventDate,d.metadata.contentType,d.metadata.topics.join('\n'),d.metadata.summary,d.metadata.limitations.join('\n'),d.sourceCount,[...d.body].length,record.filename,id,'https://drive.google.com/file/d/'+id+'/view',record.digest,VERSION,d.format,'已確認','處理中','',hash(txt),systemTest?'系統測試':'正式資料',...(d.lineage?[d.lineage.documentId,d.lineage.version,d.lineage.previousRecordId,d.lineage.changeNote,d.metadata.domains.join('\n'),d.metadata.gradeBands.join('\n'),d.metadata.usageLicense,d.metadata.visibility,d.metadata.schemaVersion,hash(JSON.stringify(d.sources))]:Array(10).fill(''))];
+    const appended=await api(sheets+'/values/'+encodeURIComponent(range+'A1:AE1')+':append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{method:'POST',json:{values:[row]}});
+    const updated=appended.updates?.updatedRange;const match=typeof updated==='string'&&updated.match(/!A([1-9]\d*):AE([1-9]\d*)$/);if(!match||match[1]!==match[2]||Number(match[1])<2)fail('STORAGE_GOOGLE','紀錄已送出，請重送以確認儲存狀態。');reservation={range:range+'A'+match[1]+':AE'+match[1],row};
    }
    const {row}=reservation;const id=row[11];
    if(row[13]!==record.digest||!/^[-\w]+$/.test(id||'')||!/^\d{4}-\d{2}-\d{2}T/.test(row[1]||''))fail('STORAGE_SCHEMA','既有紀錄內容不一致，請管理者檢查。');
-   const txt='\uFEFF'+exportText(record.document,record.document.sourceCount,row[1]);
+   const txt='\uFEFF'+archiveText(record.document,row[1]);
    if(row[19]!==hash(txt))fail('STORAGE_SCHEMA','既有檔案指紋不一致，請管理者檢查。');
    let file=await api(drive+'/'+id+'?supportsAllDrives=true&fields=id,name,parents,trashed,md5Checksum,webViewLink',{allow404:true});
    if(!file){
@@ -129,13 +151,13 @@ export function createStorage({env=process.env,fetchImpl=fetch,readFileImpl=read
    }
    const reused=row[17]==='已儲存';row[17]='已儲存';row[18]=row[18]||taipeiTime(now());await put(reservation.range,[row]);
    const verified=(await values(reservation.range))[0];if(verified?.[0]!==record.id||verified?.[17]!=='已儲存')fail('STORAGE_GOOGLE','TXT 已建立，但紀錄仍待確認；請重送。');
-   return {recordId:record.id,fileName:row[10],fileUrl:'https://drive.google.com/file/d/'+id+'/view',spreadsheetUrl:'https://docs.google.com/spreadsheets/d/'+SPREADSHEET_ID+'/edit#gid='+SHEET_ID,savedAt:row[18],reused,firestore};
+   return {recordId:record.id,fileName:row[10],fileUrl:'https://drive.google.com/file/d/'+id+'/view',spreadsheetUrl:'https://docs.google.com/spreadsheets/d/'+SPREADSHEET_ID+'/edit#gid='+SHEET_ID,savedAt:row[18],reused,firestore,...(record.document.lineage?{lineage:record.document.lineage}:{})};
   }catch(error){
    if(reservation){try{reservation.row[17]='待重試';await put(reservation.range,[reservation.row]);}catch{}}
    if(error instanceof StorageError)throw error;fail('STORAGE_UNAVAILABLE','儲存連線未完成，請保留工作稿並重送；系統會沿用相同紀錄與檔案編號。');
   }finally{locked=false;}
  }
- return {save,initialize,firestoreRequest:(url,options)=>{
+ return {save,initialize,readDocument:id=>readCurrentDocument(api,id,fail),firestoreRequest:(url,options)=>{
   if(!url.startsWith('https://firestore.googleapis.com/v1/projects/ntpc-ai-seag/databases/(default)/documents'))throw Error('Invalid Firestore destination');
   return api(url,options);
  }};

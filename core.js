@@ -1,3 +1,4 @@
+import {partialDate,metadataDefaults,validateSourceMap,remapSections} from './knowledge.js?v=0.9.0';
 export const MAX_CHARS = 100000;
 export function normalize(text) { return String(text).replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n'); }
 export function termsFrom(text) { return [...new Set(normalize(text).split('\n').map(s => s.trim()).filter(Boolean))].sort((a,b) => b.length-a.length); }
@@ -31,14 +32,15 @@ function shape(obj, keys, where) {
 }
 function string(value, where, nonempty=false) { if(typeof value!=='string'||value.length>MAX_CHARS||(nonempty&&!value.trim())) fail(`${where} 必須是有效文字${nonempty?'，且不可空白':''}。`); }
 function array(value, where, max=3000) { if(!Array.isArray(value)||value.length>max) fail(`${where} 必須是有效陣列。`); }
-export function validDate(value) { return value==='' || (/^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value)) && new Date(value).toISOString().slice(0,10)===value); }
+export function validDate(value) { return partialDate(value); }
 export function parseResult(input, segments, terms=[]) {
   if(typeof input!=='string'||input.length>1500000) fail('AI 結果過大或格式不正確。');
   let parsed;
   try { parsed=JSON.parse(input.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'')); } catch { fail('無法讀取 JSON。請貼上完整結果，並檢查引號與逗號。'); }
   // Older manually imported work files may not contain privacy suggestions.
   if(parsed && !Object.hasOwn(parsed,'privacyCandidates'))parsed.privacyCandidates=[];
-  shape(parsed,['title','body','metadata','omissions','questions','coverage','privacyCandidates'],'整理結果');
+  if(parsed&&!Object.hasOwn(parsed,'sourceMap'))parsed.sourceMap=[];
+  shape(parsed,['sourceMap','title','body','metadata','omissions','questions','coverage','privacyCandidates'],'整理結果');
   array(parsed.privacyCandidates,'privacyCandidates',300);
   const privacyIds=new Set();
   for(const item of parsed.privacyCandidates){
@@ -49,11 +51,14 @@ export function parseResult(input, segments, terms=[]) {
   }
   string(parsed.title,'title',true); string(parsed.body,'body',true);
   if(parsed.title.length>180) fail('標題請限制在 180 字元內。');
-  shape(parsed.metadata,['eventDate','contentType','topics','summary','limitations'],'metadata');
+  for(const [k,v] of Object.entries(metadataDefaults))if(parsed.metadata&&!Object.hasOwn(parsed.metadata,k))parsed.metadata[k]=structuredClone(v);
+  shape(parsed.metadata,['domains','gradeBands','usageLicense','visibility','eventDate','contentType','topics','summary','limitations'],'metadata');
   const m=parsed.metadata;
   string(m.eventDate,'日期'); if(!validDate(m.eventDate)) fail('日期必須為有效 YYYY-MM-DD 或空字串。');
   string(m.contentType,'資料類型',true);string(m.summary,'摘要');
-  for(const key of ['topics','limitations']) { array(m[key],key,100); m[key].forEach(x=>string(x,key,true)); }
+  for(const key of ['topics','limitations','domains','gradeBands']) { array(m[key],key,100); m[key].forEach(x=>string(x,key,true)); }
+  if(!['','internal_knowledge'].includes(m.usageLicense)||m.visibility!=='token_holders')fail('授權或可見範圍不正確。');
+  if(parsed.sourceMap.length)validateSourceMap(parsed.body,parsed.sourceMap,segments,true);
   const sourceIds=new Set(segments.map(s=>s.id));
   const allItemIds=new Set();
   for(const key of ['omissions','questions']) {
@@ -108,6 +113,7 @@ export function applyAnswers(result, answers) {
     for(const c of clone.coverage) if(c.status==='pending'&&c.target===q.id) { c.status='retained';c.target='人工確認與補充（含不確定或不納入決定）'; }
   }
   if(sections.length) clone.body+='\n\n人工確認與補充\n以下是提供者於整理階段新增的說明，不是逐字稿原話。若與前文有衝突，請依更正修改前文後再定稿。\n\n'+sections.join('\n\n');
+  clone.sourceMap=remapSections(result.body,clone.body,result.sourceMap||[]);
   clone.questions=[];
   return clone;
 }

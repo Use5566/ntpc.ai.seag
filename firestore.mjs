@@ -1,3 +1,4 @@
+import {revisionPlan} from './revisions.mjs';
 // Server-only Firestore persistence. The browser cannot select the destination.
 export const FIRESTORE_PROJECT='ntpc-ai-seag';
 export const FIRESTORE_DATABASE='(default)';
@@ -25,7 +26,7 @@ export async function persistKnowledge({api,record,fileId,submittedAt,toolVersio
  const d=record.document;
  const collection=testOnly?'systemChecks':'documents',jobs=testOnly?'systemCheckJobs':'ingestionJobs';
  const result={status:testOnly?'excluded_system_test':'stored',recordId:record.id};
- const document={schemaVersion:'seag_document_v1',recordId:record.id,contentSha256:record.digest,title:d.title,body:d.body,metadata:d.metadata,sourceCount:d.sourceCount,format:d.format,driveFileId:fileId,createdAt:submittedAt,toolVersion,humanConfirmed:true,recordType:testOnly?'system_test':'knowledge'};
+ const document={schemaVersion:d.format==='seag_text_v2'?'seag_document_v2':'seag_document_v1',recordId:record.id,contentSha256:record.digest,title:d.title,body:d.body,metadata:d.metadata,sourceCount:d.sourceCount,format:d.format,driveFileId:fileId,createdAt:submittedAt,toolVersion,humanConfirmed:true,recordType:testOnly?'system_test':'knowledge',...(d.format==='seag_text_v2'?{sources:d.sources,sourceMap:d.sourceMap,lineage:d.lineage,sourceConfirmed:true,confirmedAt:submittedAt}:{})};
  const url=FIRESTORE_ROOT+'/'+collection+'/'+record.id;
  const existing=await api(url,{allow404:true});
  if(existing){
@@ -37,9 +38,10 @@ export async function persistKnowledge({api,record,fileId,submittedAt,toolVersio
   if(job?.fields?.contentSha256?.stringValue!==record.digest)fail('STORAGE_FIRESTORE_INTEGRITY','Firestore 處理紀錄缺失或不一致，請管理者檢查。');
   return result;
  }
+ const plan=await revisionPlan(api,record,fail,testOnly);
  const job={schemaVersion:'seag_ingestion_v1',documentId:record.id,contentSha256:record.digest,status:testOnly?'excluded_system_test':'awaiting_vectorization',attempts:0,createdAt:submittedAt,updatedAt:submittedAt};
  // Atomic create: no partial document/job pair and no overwriting later job progress.
- await api(FIRESTORE_ROOT+':commit',{method:'POST',json:{writes:[
+ await api(FIRESTORE_ROOT+':commit',{method:'POST',json:{writes:[...plan.writes,
   {update:{name:root+'/'+collection+'/'+record.id,fields:firestoreFields(document)},currentDocument:{exists:false}},
   {update:{name:root+'/'+jobs+'/'+record.id,fields:firestoreFields(job)},currentDocument:{exists:false}}
  ]}});

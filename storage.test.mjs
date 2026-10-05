@@ -26,9 +26,9 @@ function mock(){
   }
   if(u.pathname.endsWith('/files/'+FOLDER_ID))return json({id:FOLDER_ID,mimeType:'application/vnd.google-apps.folder',driveId:state.folderShared?'shared':undefined,capabilities:{canAddChildren:true}});
   if(u.hostname==='sheets.googleapis.com'){
-   if(!u.pathname.includes('/values/'))return json({sheets:[{properties:{sheetId:0,title:'匯入紀錄',gridProperties:{rowCount:1000,columnCount:26}}}]});
+   if(!u.pathname.includes('/values/'))return json({sheets:[{properties:{sheetId:0,title:'匯入紀錄',gridProperties:{rowCount:1000,columnCount:31}}}]});
    const range=decodeURIComponent(u.pathname.split('/values/')[1]);
-   if(range.endsWith(':append')){assert.equal(u.searchParams.get('valueInputOption'),'RAW');state.rows.push(JSON.parse(options.body).values[0]);state.appends++;return json({updates:{updatedRange:`'匯入紀錄'!A${state.rows.length}:U${state.rows.length}`}});}
+   if(range.endsWith(':append')){assert.equal(u.searchParams.get('valueInputOption'),'RAW');state.rows.push(JSON.parse(options.body).values[0]);state.appends++;return json({updates:{updatedRange:`'匯入紀錄'!A${state.rows.length}:AE${state.rows.length}`}});}
    const [,start,col,end]=range.match(/!A(\d+):([A-Z]+)(\d+)$/)||[];assert.ok(start,range);
    if(method==='PUT'){assert.equal(u.searchParams.get('valueInputOption'),'RAW');const row=JSON.parse(options.body).values[0];if(state.failComplete&&row[17]==='已儲存'){state.failComplete=false;throw Error('模擬回覆中斷');}state.rows[Number(start)-1]=row;return json({updatedCells:21});}
    if(Number(start)===1&&Number(end)===1)return json({values:[state.header]});
@@ -74,4 +74,12 @@ test('系統測試永遠不進知識庫；Firestore 只接收正式稿白名單'
  const {state,storage}=mock();const result=await storage.save(input,{systemTest:true});assert.equal(result.firestore.status,'excluded_system_test');await storage.save(input);assert.equal(state.firestore.size,2);assert.ok([...state.firestore.keys()].every(k=>k.includes('/systemCheck')));
  const m=mock();await m.storage.save(input);const doc=[...m.state.firestore.values()].find(x=>x.name.includes('/documents/documents/'));
  assert.deepEqual(Object.keys(doc.fields).sort(),['schemaVersion','recordId','contentSha256','title','body','metadata','sourceCount','format','driveFileId','createdAt','toolVersion','humanConfirmed','recordType'].sort());
+});
+
+test('兩層正式稿完整寫入 TXT、版本欄位與 Firestore；重送不重複',async()=>{
+ const f=mock();const d={...input,sourceCount:1,metadata:{...input.metadata,domains:['自然科學'],gradeBands:['國小'],usageLicense:'internal_knowledge',visibility:'token_holders',schemaVersion:'seag_metadata_v2'},sources:[{id:'P001',text:'詳細底稿：觀察與證據；保留未摘要的案例。'}],sourceMap:[{sectionId:'S001',sourceIds:['P001'],kind:'source'}],sourceConfirmed:true,lineage:{documentId:'DOC-11111111-2222-4333-8444-555555555555',version:1,previousRecordId:'',changeNote:'初次建立'}};
+ const storage=f.storage;
+ const saved=await storage.save(d);assert.equal(saved.lineage.version,1);assert.equal(f.state.rows[1][21],d.lineage.documentId);assert.equal(f.state.rows[1][22],1);assert.equal(f.state.rows[1][29],'seag_metadata_v2');assert.equal(f.state.firestore.size,3);
+ const raw=[...f.state.firestore.values()].find(x=>x.name.includes('/documents/SEAG-'));assert.equal(raw.fields.sources.arrayValue.values[0].mapValue.fields.text.stringValue,d.sources[0].text);
+ await storage.save(d);assert.equal(f.state.creates,1);assert.equal(f.state.appends,1);
 });
