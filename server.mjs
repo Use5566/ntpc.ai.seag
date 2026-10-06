@@ -94,7 +94,7 @@ export async function createApp({env=process.env,fetchImpl=fetch,now=Date.now,st
         for(let attempt=0;attempt<2;attempt++){
         const response=await fetchImpl('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent',{
           method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':key},signal:controller.signal,
-          body:JSON.stringify({systemInstruction:{parts:[{text:[prompts.system,prompts[input.mode],prompts['output-schema']].join('\n\n')}]},contents,generationConfig:{responseMimeType:'application/json',responseJsonSchema:organizeSchema(input.source.length),maxOutputTokens:32768}})
+          body:JSON.stringify({systemInstruction:{parts:[{text:[prompts.system,prompts[input.mode],prompts['output-schema']].join('\n\n')}]},contents,generationConfig:{responseMimeType:'application/json',responseSchema:organizeSchema(),maxOutputTokens:32768}})
         });
         // Never return or log raw upstream errors, request headers, prompts, or transcripts.
         if(!response.ok){await response.body?.cancel();const code=({400:'UPSTREAM_REQUEST',401:'UPSTREAM_AUTH',403:'UPSTREAM_AUTH',404:'MODEL_UNAVAILABLE',429:'UPSTREAM_QUOTA'})[response.status]||'UPSTREAM_SERVICE';fail(response.status===429?429:502,'Gemini 呼叫失敗。',code);}

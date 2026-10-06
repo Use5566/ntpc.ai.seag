@@ -27,7 +27,7 @@ test('修訂必須處理所有問題',async t=>{const app=await setup(t);const d
 
 test('結構化段落把標題及空白行轉為完整對照，不遺失文字',async t=>{
  const text='觀察主題\n\n觀察並記錄日期。\n\n保留記錄中的限制。';
- const app=await setup(t,async(url,options)=>{const config=JSON.parse(options.body).generationConfig;assert.ok(config.responseJsonSchema.required.includes('sections'));assert.equal(config.responseJsonSchema.properties.coverage.minItems,1);return reply(structured(text));});
+ const app=await setup(t,async(url,options)=>{const config=JSON.parse(options.body).generationConfig;assert.ok(config.responseSchema.required.includes('sections'));assert.equal(config.responseSchema.properties.coverage.type,'ARRAY');assert.equal(config.responseSchema.properties.metadata.properties.usageLicense.enum,undefined);return reply(structured(text));});
  const r=await app.request();assert.equal(r.status,200);const {result:d}=await r.json();assert.equal(d.body,text);assert.deepEqual(d.sourceMap,[1,2,3].map(n=>({sectionId:'S00'+n,sourceIds:['P001'],kind:'source'})));assert.equal(d.sections,undefined);
 });
 test('來源對照失敗只修復一次，第二次仍無效不可放行',async t=>{

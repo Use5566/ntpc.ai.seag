@@ -1,18 +1,18 @@
 import {parseResult,MAX_CHARS} from './core.js';
 import {bodySections,validateSourceMap} from './knowledge.js';
 
-const str={type:'string'};
-const list=(items,maxItems=3000)=>({type:'array',items,maxItems});
-const obj=properties=>({type:'object',properties,required:Object.keys(properties),additionalProperties:false});
+const str={type:'STRING'};
+const list=items=>({type:'ARRAY',items});
+const obj=properties=>({type:'OBJECT',properties,required:Object.keys(properties)});
 const ids=list(str);
 // Structural constraints only; editing instructions remain in TXT files.
-export function organizeSchema(sourceCount){
- return obj({title:str,sections:list(obj({text:str,sourceIds:ids,kind:{type:'string',enum:['source','supplement']}})),
-  metadata:obj({eventDate:str,contentType:str,topics:list(str,100),summary:str,limitations:list(str,100),domains:list(str,100),gradeBands:list(str,100),usageLicense:{type:'string',enum:['']},visibility:{type:'string',enum:['token_holders']}}),
+export function organizeSchema(){
+ return obj({title:str,sections:list(obj({text:str,sourceIds:ids,kind:{type:'STRING',enum:['source','supplement']}})),
+  metadata:obj({eventDate:str,contentType:str,topics:list(str,100),summary:str,limitations:list(str,100),domains:list(str,100),gradeBands:list(str,100),usageLicense:str,visibility:{type:'STRING',enum:['token_holders']}}),
   omissions:list(obj({id:str,sourceIds:ids,text:str,reason:str})),
   questions:list(obj({id:str,sourceIds:ids,question:str,context:str})),
   privacyCandidates:list(obj({id:str,sourceIds:ids,text:str,replacement:str,reason:str}),300),
-  coverage:{...list(obj({sourceId:str,status:{type:'string',enum:['retained','merged','omitted','pending']},target:str})),minItems:sourceCount,maxItems:sourceCount}
+  coverage:list(obj({sourceId:str,status:{type:'STRING',enum:['retained','merged','omitted','pending']},target:str}))
  });
 }
 
