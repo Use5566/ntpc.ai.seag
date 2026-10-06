@@ -1,4 +1,4 @@
-import {validateSourceMap} from './knowledge.js';
+import {organizeSchema,parseOrganizeOutput} from './organize-output.mjs';
 import {createChat,ChatError,validateChat} from './chat.mjs';
 import http from 'node:http';
 import {readFile} from 'node:fs/promises';
@@ -38,7 +38,7 @@ export async function createApp({env=process.env,fetchImpl=fetch,now=Date.now,st
   if(!key||token.length<32||token.length>256||token===key)throw Error('請在 Render 設定 GEMINI_API_KEY 及不同的 SEAG_ACCESS_TOKEN（32–256 字元）。');
   const origin=env.ALLOWED_ORIGIN||'https://use5566.github.io';
   if(new URL(origin).origin!==origin||!origin.startsWith('https://'))throw Error('ALLOWED_ORIGIN 必須是完整 HTTPS origin，不含路徑。');
-  const prompts=Object.fromEntries(await Promise.all(['system','analyze','revise','output-schema'].map(async n=>[n,await readFile(new URL(`./prompt-${n}.txt`,import.meta.url),'utf8')])));
+  const prompts=Object.fromEntries(await Promise.all(['system','analyze','revise','output-schema','repair'].map(async n=>[n,await readFile(new URL(`./prompt-${n}.txt`,import.meta.url),'utf8')])));
   const tokenHash=digest(token);let busy=false;let calls=[];
   const storage=storageImpl||createStorage({env,fetchImpl});
   const vector=vectorImpl||createVectorizer({api:storage.firestoreRequest,env,fetchImpl,now});
@@ -90,9 +90,11 @@ export async function createApp({env=process.env,fetchImpl=fetch,now=Date.now,st
       const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),110000);
       const disconnect=()=>{if(!res.writableEnded)controller.abort();};res.on('close',disconnect);
       try{
+        const contents=[{role:'user',parts:[{text:serialized}]}];
+        for(let attempt=0;attempt<2;attempt++){
         const response=await fetchImpl('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent',{
           method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':key},signal:controller.signal,
-          body:JSON.stringify({systemInstruction:{parts:[{text:[prompts.system,prompts[input.mode],prompts['output-schema']].join('\n\n')}]},contents:[{role:'user',parts:[{text:serialized}]}],generationConfig:{responseMimeType:'application/json',maxOutputTokens:32768}})
+          body:JSON.stringify({systemInstruction:{parts:[{text:[prompts.system,prompts[input.mode],prompts['output-schema']].join('\n\n')}]},contents,generationConfig:{responseMimeType:'application/json',responseJsonSchema:organizeSchema(input.source.length),maxOutputTokens:32768}})
         });
         // Never return or log raw upstream errors, request headers, prompts, or transcripts.
         if(!response.ok){await response.body?.cancel();const code=({400:'UPSTREAM_REQUEST',401:'UPSTREAM_AUTH',403:'UPSTREAM_AUTH',404:'MODEL_UNAVAILABLE',429:'UPSTREAM_QUOTA'})[response.status]||'UPSTREAM_SERVICE';fail(response.status===429?429:502,'Gemini 呼叫失敗。',code);}
@@ -102,8 +104,20 @@ export async function createApp({env=process.env,fetchImpl=fetch,now=Date.now,st
         if(candidate?.finishReason!=='STOP')fail(502,'AI 未完整產生結果，請縮短逐字稿後再試。','RESULT_INCOMPLETE');
         const output=(candidate.content?.parts||[]).filter(p=>!p.thought).map(p=>p.text||'').join('');
         if(output.includes(key)||output.includes(token)||(admin&&output.includes(admin)))fail(502,'AI 回應未通過安全檢查。');
-        let result;try{if(!Array.isArray(JSON.parse(output).privacyCandidates))throw Error();result=parseResult(output,input.source);validateSourceMap(result.body,result.sourceMap,input.source);}catch{fail(502,'AI 結果未通過格式、來源完整性或去識別檢查。原稿仍保留，請稍後重試或拆分內容。','RESULT_INVALID');}
-        send(200,{result});
+        let result;
+        try{result=parseOrganizeOutput(output,input.source);}
+        catch(error){
+          const time=now();calls=calls.filter(t=>time-t<86400000);
+          if(attempt===0&&calls.length<daily&&calls.filter(t=>time-t<3600000).length<hourly){
+            calls.push(time);
+            contents.push({role:'model',parts:[{text:output}]},{role:'user',parts:[{text:prompts.repair+'\n'+(error instanceof SyntaxError?'JSON 語法不正確。':error.message)}]});
+            continue;
+          }
+          fail(502,'AI 結果在一次格式修復後仍未通過來源或去識別檢查。原稿仍保留。','RESULT_INVALID');
+        }
+        send(200,{result});break;
+        }
+
       }finally{clearTimeout(timer);res.off('close',disconnect);busy=false;}
     }catch(error){const known=error instanceof HttpError||error instanceof StorageError||error instanceof VectorError||error instanceof ChatError;send(known?error.status:503,{error:known?error.message:'服務暫時無法完成或已逾時，原稿仍保留，請稍後重試。',code:known?error.code:'SERVICE_TIMEOUT'});}
   });

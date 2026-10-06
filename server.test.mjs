@@ -7,6 +7,7 @@ const origin='https://use5566.github.io';
 const input={mode:'analyze',title:'觀察',source:[{id:'P001',text:'觀察並記錄日期。'}]};
 const result={sourceMap:[{sectionId:'S001',sourceIds:['P001'],kind:'source'}],title:'觀察',body:'觀察並記錄日期。',metadata:{eventDate:'',contentType:'整理稿',topics:[],summary:'',limitations:[],domains:[],gradeBands:[],usageLicense:'',visibility:'token_holders'},omissions:[],questions:[],privacyCandidates:[],coverage:[{sourceId:'P001',status:'retained',target:'觀察'}]};
 const reply=value=>new Response(JSON.stringify({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(value)}]}}]}));
+const structured=(text='觀察並記錄日期。',sourceIds=['P001'])=>{const {body,sourceMap,...rest}=result;return {...rest,sections:[{text,sourceIds,kind:'source'}]};};
 async function setup(t,fetchImpl=async()=>reply(result),extra={}){
  const server=await createApp({env:{GEMINI_API_KEY:key,SEAG_ACCESS_TOKEN:token,...extra},fetchImpl});
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -23,6 +24,21 @@ test('拒絕未齊全或含憑證的 AI 結果',async t=>{let n=0;const app=awai
 test('拒絕禁止欄位、超長來源及自訂模型提示詞',async t=>{const app=await setup(t,async()=>{assert.fail('不可呼叫模型');});assert.equal((await app.request({...input,model:'other'})).status,400);assert.equal((await app.request({...input,source:[{id:'P001',text:'x'.repeat(100001)}]})).status,413);assert.equal((await app.request({...input,metadataHints:{hostOrganization:'X'}})).status,400);});
 test('共用使用上限不可藉不同 IP 規避',async t=>{const app=await setup(t,undefined,{MAX_REQUESTS_PER_HOUR:'1'});assert.equal((await app.request()).status,200);assert.equal((await app.request(input,{'X-Forwarded-For':'1.2.3.4'})).status,429);});
 test('修訂必須處理所有問題',async t=>{const app=await setup(t);const draft={...result,questions:[{id:'Q001',sourceIds:['P001'],question:'日期？',context:'未確認'}]};const body={...input,mode:'revise',currentDraft:draft,editorDecisions:{},previousDecisions:[]};assert.equal((await app.request(body)).status,400);body.editorDecisions={Q001:{action:'unknown',text:''}};assert.equal((await app.request(body)).status,200);});
+
+test('結構化段落把標題及空白行轉為完整對照，不遺失文字',async t=>{
+ const text='觀察主題\n\n觀察並記錄日期。\n\n保留記錄中的限制。';
+ const app=await setup(t,async(url,options)=>{const config=JSON.parse(options.body).generationConfig;assert.ok(config.responseJsonSchema.required.includes('sections'));assert.equal(config.responseJsonSchema.properties.coverage.minItems,1);return reply(structured(text));});
+ const r=await app.request();assert.equal(r.status,200);const {result:d}=await r.json();assert.equal(d.body,text);assert.deepEqual(d.sourceMap,[1,2,3].map(n=>({sectionId:'S00'+n,sourceIds:['P001'],kind:'source'})));assert.equal(d.sections,undefined);
+});
+test('來源對照失敗只修復一次，第二次仍無效不可放行',async t=>{
+ let calls=0;const app=await setup(t,async()=>{calls++;return reply(structured('觀察。',['P999']));});const r=await app.request();assert.equal(r.status,502);assert.equal((await r.json()).code,'RESULT_INVALID');assert.equal(calls,2);
+});
+test('修復保留原來源及前次結果，成功後交由人工確認',async t=>{
+ let calls=0;const app=await setup(t,async(url,options)=>{const req=JSON.parse(options.body);if(calls++===0)return reply(structured('觀察。',['P999']));assert.equal(JSON.parse(req.contents[0].parts[0].text).source[0].id,'P001');assert.equal(req.contents.length,3);assert.ok(req.contents[2].parts[0].text.includes('唯一一次修復'));return reply(structured());});assert.equal((await app.request()).status,200);assert.equal(calls,2);
+});
+test('去識別候選非精確原文仍拒絕；修復也受用量限制',async t=>{
+ let calls=0;const app=await setup(t,async()=>{calls++;return reply({...structured(),privacyCandidates:[{id:'D001',sourceIds:['P001'],text:'不存在的姓名',replacement:'[識別D001]',reason:'人名'}]});},{MAX_REQUESTS_PER_HOUR:'1'});assert.equal((await app.request()).status,502);assert.equal(calls,1);
+});
 
 test('雲端儲存 API 必須通過來源、存取碼與正式稿格式檢查',async t=>{
  let saves=0;const server=await createApp({env:{GEMINI_API_KEY:key,SEAG_ACCESS_TOKEN:token},fetchImpl:async()=>assert.fail('儲存不能呼叫 Gemini'),storageImpl:{save:async body=>{validateSubmission(body);saves++;return {recordId:'test'};}}});

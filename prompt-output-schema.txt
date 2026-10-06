@@ -1,32 +1,25 @@
-回傳單一合法 JSON 物件。所有欄位必填；沒有項目時使用 []，沒有日期用 ""。不可新增欄位。
-以下是結構示例，內容只是格式占位，請改成實際內容：
+回傳單一合法 JSON 物件。所有欄位必填；沒有項目時使用 []；未知日期用空字串。不可新增欄位。
+本格式供模型回傳使用。正文使用 sections 陣列，每項把段落文字與來源放在一起；不要另外輸出 body 或 sourceMap。伺服器會依序組成正文並建立 S 編號，避免空白行與標題造成來源對照筆數不同。
+以下為結構示例，P 編號與內容均須依實際輸入替換：
 {
   "title": "中性知識稿標題",
-  "body": "主題一 [P001]\n完整描述性段落。",
+  "sections": [
+    {"text": "主題一 [P001]\n完整描述性段落。", "sourceIds": ["P001"], "kind": "source"}
+  ],
   "metadata": {
-    "eventDate": "",
-    "contentType": "研習逐字稿整理",
-    "topics": ["主題"],
-    "summary": "整體內容摘要",
-    "limitations": ["缺少圖表等必要限制；無限制時使用空陣列"]
+    "eventDate": "", "contentType": "研習逐字稿整理", "topics": ["主題"],
+    "summary": "整體內容摘要", "limitations": [], "domains": [], "gradeBands": [],
+    "usageLicense": "", "visibility": "token_holders"
   },
-  "omissions": [
-    {"id": "O001", "sourceIds": ["P002"], "text": "被完全捨棄且已去識別的內容", "reason": "捨棄原因"}
-  ],
-  "questions": [
-    {"id": "Q001", "sourceIds": ["P003"], "question": "請提供者確認的問題", "context": "說明疑點，不能洩漏身分"}
-  ],
-  "privacyCandidates": [],
-  "sourceMap": [{"sectionId":"S001","sourceIds":["P001"],"kind":"source"}],
-  "coverage": [
-    {"sourceId": "P001", "status": "retained", "target": "主題一"},
-    {"sourceId": "P002", "status": "omitted", "target": "O001"},
-    {"sourceId": "P003", "status": "pending", "target": "Q001"}
-  ]
+  "omissions": [], "questions": [], "privacyCandidates": [],
+  "coverage": [{"sourceId": "P001", "status": "retained", "target": "主題一"}]
 }
-metadata 不得有 hostOrganization、participantRoles 或 speakers。來源 ID 必須來自輸入；不得捏造。coverage 必須涵蓋全部來源，每個 sourceId 恰好一次。omissions 與 questions 的 id 各自唯一。
-
-privacyCandidates 為必填陣列。每項格式：{"id":"D001","sourceIds":["P001"],"text":"來源中的精確識別文字","replacement":"[識別D001]","reason":"可能識別單位或個人的原因"}。沒有候選用 []。
-
-sourceMap 必填，必須依 body 以空白行分隔的非空段落逐段對應，包含獨立標題段落。依序使用 S001、S002 等編號，每項只有 sectionId、sourceIds、kind。來源內容 kind 為 source，sourceIds 至少一個且必須存在；提供者事後新增且沒有逐字稿依據的內容 kind 為 supplement，sourceIds 為 []。不要用 supplement 規避來源對照。每一段正文都必須有一筆 sourceMap。
-metadata 另需 domains（領域字串陣列）、gradeBands（教材適用年段字串陣列，非參與者身分）、usageLicense（固定空字串，留給使用者確認）、visibility（固定 token_holders）。日期可為 YYYY、YYYY-MM、YYYY-MM-DD 或空字串，不得補猜。
+sections 每項只有 text、sourceIds、kind。來源內容 kind 為 source，sourceIds 至少一個有效 P 編號。不同來源的段落請拆成不同項目；標題和條列可留在同項目中。不省略重要細節。
+僅當提供者事後補充且沒有逐字稿依據時，kind 使用 supplement，sourceIds 使用 []。不可用 supplement 規避來源對照。
+metadata 不得有 hostOrganization、participantRoles、speakers、schemaVersion 或其他額外欄位。domains 是教材領域；gradeBands 是教材適用年段，不是參與者身分。usageLicense 固定空字串，留給使用者確認。visibility 固定 token_holders。
+日期可為 YYYY、YYYY-MM、YYYY-MM-DD 或空字串；不得補猜。
+omissions 每項格式：{"id":"O001","sourceIds":["P001"],"text":"完全捨棄且已去識別的內容","reason":"捨棄原因"}。
+questions 每項格式：{"id":"Q001","sourceIds":["P001"],"question":"需確認的問題","context":"疑點脈絡，不洩漏身分"}。
+privacyCandidates 每項格式：{"id":"D001","sourceIds":["P001"],"text":"來源中的精確識別文字","replacement":"[識別D001]","reason":"建議原因"}。同一 text 必須逐字出現在每個列出的 sourceIds 中。不同位置的文字不可拼接；不補字、不改標點、不加省略號。候選 id 從 D001 起，replacement 必須配對。
+coverage 必須涵蓋全部來源，每個 sourceId 恰好一次。status 僅可為 retained、merged、omitted、pending。retained／merged 的 target 填正文主題；omitted 的 target 必須是該來源的 O 編號；pending 的 target 必須是該來源的 Q 編號。
+所有 P 編號只可來自輸入；O、Q、D 編號各自唯一。正文、metadata、捨棄清單與問題中的識別候選暫用 replacement 代稱，只有 privacyCandidates.text 保留原文。
