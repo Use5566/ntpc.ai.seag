@@ -87,21 +87,26 @@ export async function createApp({env=process.env,fetchImpl=fetch,now=Date.now,st
         try{send(200,{archive:await storage.save(input)});}finally{busy=false;}
         return;
       }
-      const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),110000);
+      const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),240000);
       const disconnect=()=>{if(!res.writableEnded)controller.abort();};res.on('close',disconnect);
       try{
         const contents=[{role:'user',parts:[{text:serialized}]}];
         for(let attempt=0;attempt<2;attempt++){
         const response=await fetchImpl('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent',{
           method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':key},signal:controller.signal,
-          body:JSON.stringify({systemInstruction:{parts:[{text:[prompts.system,prompts[input.mode],prompts['output-schema']].join('\n\n')}]},contents,generationConfig:{responseMimeType:'application/json',responseSchema:organizeSchema(),maxOutputTokens:32768}})
+          body:JSON.stringify({systemInstruction:{parts:[{text:[prompts.system,prompts[input.mode],prompts['output-schema']].join('\n\n')}]},contents,generationConfig:{responseMimeType:'application/json',responseSchema:organizeSchema(),maxOutputTokens:65536}})
         });
         // Never return or log raw upstream errors, request headers, prompts, or transcripts.
         if(!response.ok){await response.body?.cancel();const code=({400:'UPSTREAM_REQUEST',401:'UPSTREAM_AUTH',403:'UPSTREAM_AUTH',404:'MODEL_UNAVAILABLE',429:'UPSTREAM_QUOTA'})[response.status]||'UPSTREAM_SERVICE';fail(response.status===429?429:502,'Gemini 呼叫失敗。',code);}
         const chunks=[];let size=0;for await(const chunk of response.body){size+=chunk.length;if(size>6000000)fail(502,'AI 回應過大，請縮短逐字稿。');chunks.push(chunk);}const raw=Buffer.concat(chunks).toString('utf8');
         let payload;try{payload=JSON.parse(raw);}catch{fail(502,'AI 回應格式不正確。');}
         const candidate=payload.candidates?.[0];
-        if(candidate?.finishReason!=='STOP')fail(502,'AI 未完整產生結果，請縮短逐字稿後再試。','RESULT_INCOMPLETE');
+        if(candidate?.finishReason!=='STOP'){
+          const reason=['MAX_TOKENS','SAFETY','RECITATION','OTHER','BLOCKLIST','PROHIBITED_CONTENT','SPII','MALFORMED_FUNCTION_CALL','UNEXPECTED_TOOL_CALL'].includes(candidate?.finishReason)?candidate.finishReason:'UNKNOWN';
+          const number=x=>Number.isSafeInteger(x)&&x>=0?x:0;
+          console.warn('SEAG_ORGANIZE_INCOMPLETE',JSON.stringify({reason,attempt:attempt+1,promptTokens:number(payload.usageMetadata?.promptTokenCount),outputTokens:number(payload.usageMetadata?.candidatesTokenCount),thoughtTokens:number(payload.usageMetadata?.thoughtsTokenCount)}));
+          fail(502,'AI 未完整產生結果，原稿仍保留。',reason==='MAX_TOKENS'?'RESULT_OUTPUT_LIMIT':'RESULT_INCOMPLETE');
+        }
         const output=(candidate.content?.parts||[]).filter(p=>!p.thought).map(p=>p.text||'').join('');
         if(output.includes(key)||output.includes(token)||(admin&&output.includes(admin)))fail(502,'AI 回應未通過安全檢查。');
         let result;

@@ -87,13 +87,13 @@ async function runAI(revise=false){
   if(revise){applyAnswers(state.result,state.answers);input.currentDraft=state.result;input.editorDecisions=state.answers;input.previousDecisions=state.history;}
   if(secretLike(JSON.stringify(input)))throw new Error('內容疑似包含金鑰，請先移除。');
   field.value='';if(revise)$('token-dialog').close();
-  message('AI 處理中，請勿關閉分頁。首次啟動服務可能較慢，最多等待約兩分鐘。',true);
+  message('AI 處理中，請勿關閉分頁。首次啟動服務可能較慢，長稿最多等待約四分鐘。',true);
   document.body.inert=true;
-  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),125000);
+  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),255000);
   try{
     const response=await fetch(`${API_BASE}/api/organize`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},body:JSON.stringify(input),signal:controller.signal,credentials:'omit',cache:'no-store',redirect:'error'});
     let data;try{data=await response.json();}catch{throw new Error('後端尚未就緒或回傳格式不正確，原稿仍保留。');}
-    const diagnostics={MODEL_UNAVAILABLE:'目前金鑰無法使用 gemini-3.5-flash-lite（Google 回傳 404）。請確認帳號可用的模型。',UPSTREAM_AUTH:'Google 拒絕金鑰或專案權限（401／403）。請檢查 Render 的 GEMINI_API_KEY 與 Google API 設定。',UPSTREAM_REQUEST:'Google 不接受目前模型請求（400），請管理者檢查模型與參數相容性。',UPSTREAM_QUOTA:'Gemini 額度或速率已達上限。',UPSTREAM_SERVICE:'Google 服務暫時失敗，請稍後再試。',RESULT_INCOMPLETE:'Gemini 未完整產生結果，可能達輸出上限或被安全機制阻擋。請縮短內容後再試。',RESULT_INVALID:'Gemini 已回應，但 JSON 格式、來源對應或去識別候選未通過檢查。請重試或拆分逐字稿。'};
+    const diagnostics={MODEL_UNAVAILABLE:'目前金鑰無法使用 gemini-3.5-flash-lite（Google 回傳 404）。請確認帳號可用的模型。',UPSTREAM_AUTH:'Google 拒絕金鑰或專案權限（401／403）。請檢查 Render 的 GEMINI_API_KEY 與 Google API 設定。',UPSTREAM_REQUEST:'Google 不接受目前模型請求（400），請管理者檢查模型與參數相容性。',UPSTREAM_QUOTA:'Gemini 額度或速率已達上限。',UPSTREAM_SERVICE:'Google 服務暫時失敗，請稍後再試。',RESULT_OUTPUT_LIMIT:'Gemini 已達本次輸出上限，整理結果尚未完整。原稿仍保留，請勿重新整理頁面。',RESULT_INCOMPLETE:'Gemini 未完整產生結果，可能達輸出上限或被安全機制阻擋。請縮短內容後再試。',RESULT_INVALID:'Gemini 已回應，但 JSON 格式、來源對應或去識別候選未通過檢查。請重試或拆分逐字稿。'};
     if(!response.ok&&Object.hasOwn(diagnostics,data.code))throw new Error(diagnostics[data.code]);
     if(!response.ok)throw new Error(({401:'存取碼不正確，請重新輸入。',403:'網站來源未獲允許，請管理者檢查設定。',400:'請先完成問題回覆並檢查內容格式及去識別資訊。',413:'內容超過上限，請拆分逐字稿。',429:'服務忙碌或已達使用上限，請稍後再試。',502:'Gemini 呼叫或結果檢查失敗，請縮短內容重試；若持續失敗請管理者檢查金鑰及模型權限。',503:'服務啟動中或已逾時，請稍後再試。'})[response.status]||'AI 整理未完成，原稿仍保留。');
     acceptResult(JSON.stringify(data.result));

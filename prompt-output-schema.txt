@@ -4,7 +4,7 @@
 {
   "title": "中性知識稿標題",
   "sections": [
-    {"text": "主題一 [P001]\n完整描述性段落。", "sourceIds": ["P001"], "kind": "source"}
+    {"text": "主題一\n完整描述性段落。", "sourceIds": ["P001"], "kind": "source"}
   ],
   "metadata": {
     "eventDate": "", "contentType": "研習逐字稿整理", "topics": ["主題"],
@@ -24,4 +24,4 @@ privacyCandidates 每項格式：{"id":"D001","sourceIds":["P001"],"text":"來�
 coverage 必須涵蓋全部來源，每個 sourceId 恰好一次。status 僅可為 retained、merged、omitted、pending。retained／merged 的 target 填正文主題；omitted 的 target 必須是該來源的 O 編號；pending 的 target 必須是該來源的 Q 編號。
 所有 P 編號只可來自輸入；O、Q、D 編號各自唯一。正文、metadata、捨棄清單與問題中的識別候選暫用 replacement 代稱，只有 privacyCandidates.text 保留原文。
 
-整理稿的標題與 sections.text 只含可閱讀的正文，不得寫入 [P001, P002] 等來源段落編碼；所有來源編號僅放在 sourceIds 等專用欄位。每個 section 應為便於核對的小段，避免以整個大主題籠統對應大量來源；請只連結確實支持該段的原文。
+整理稿的標題與 sections.text 只含可閱讀的正文，不得寫入 [P001, P002] 等來源段落編碼；所有來源編號僅放在 sourceIds 等專用欄位。每個 section 以一個完整知識點為單位，不需逐一重寫每個原始段落。同一知識點的連續原文可合理合併，sourceIds 只列真正支持該知識點的來源。避免重複正文、重複大段原文或多餘排版空白，但不得為縮短輸出而刪除重要細節。

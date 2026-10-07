@@ -69,3 +69,4 @@ test('知識問答沿用工具碼，管理碼不能代替；問答不呼叫向�
  assert.equal((await post(admin)).status,401);assert.equal((await post(token,{question:'評量',history:[],testOnly:true})).status,400);assert.equal((await post(token)).status,200);assert.equal(asked,1);
 });
 
+test('長稿使用 65536 輸出上限且不接受截斷內容',async t=>{let calls=0;const app=await setup(t,async(_url,options)=>{calls++;assert.equal(JSON.parse(options.body).generationConfig.maxOutputTokens,65536);return new Response(JSON.stringify({candidates:[{finishReason:'MAX_TOKENS',content:{parts:[{text:'{"title":"未完成'}]}}],usageMetadata:{promptTokenCount:24000,candidatesTokenCount:65536}}));});const res=await app.request({...input,source:[{id:'P001',text:'教學'.repeat(12000)}]});assert.equal(res.status,502);assert.equal((await res.json()).code,'RESULT_OUTPUT_LIMIT');assert.equal(calls,1);});
