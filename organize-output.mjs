@@ -17,7 +17,8 @@ export function organizeSchema(){
 }
 
 export function parseOrganizeOutput(output,sources){
- const raw=JSON.parse(output);
+ const raw=JSON.parse(output.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,''));
+ normalizeOutput(raw,sources);
  if(!raw||!Array.isArray(raw.privacyCandidates))throw Error('privacyCandidates 必須是陣列。');
  if(Object.hasOwn(raw,'sections')){
   if(Object.hasOwn(raw,'body')||Object.hasOwn(raw,'sourceMap')||!Array.isArray(raw.sections)||!raw.sections.length||raw.sections.length>3000)throw Error('整理稿段落結構不正確。');
@@ -36,4 +37,41 @@ export function parseOrganizeOutput(output,sources){
  const result=parseResult(JSON.stringify(raw),sources);
  validateSourceMap(result.body,result.sourceMap,sources);
  return result;
+}
+
+// Normalize transport details only. Unknown source IDs and ungrounded privacy
+// candidates still pass through the strict validator and are never discarded.
+function normalizeOutput(raw,sources){
+ if(!raw||typeof raw!=='object'||Array.isArray(raw))throw Error('結果必須是物件。');
+ for(const key of ['omissions','questions','privacyCandidates'])if(raw[key]==null)raw[key]=[];
+ const defaults={eventDate:'',contentType:'整理稿',topics:[],summary:'',limitations:[],domains:[],gradeBands:[],usageLicense:'',visibility:'token_holders'};
+ if(raw.metadata==null)raw.metadata={};
+ for(const [key,value] of Object.entries(defaults))if(raw.metadata[key]==null)raw.metadata[key]=value;
+ const canonical=new Map(sources.map(s=>[s.id.toUpperCase(),s.id]));
+ const normalizeIds=value=>{
+  if(typeof value==='string')value=value.split(/[,，、\s]+/).filter(Boolean);
+  if(!Array.isArray(value))return value;
+  return [...new Set(value.map(id=>typeof id==='string'?(canonical.get(id.trim().toUpperCase())||id.trim()):id))];
+ };
+ for(const list of [raw.sections,raw.sourceMap,raw.omissions,raw.questions,raw.privacyCandidates]){
+  if(!Array.isArray(list))continue;
+  for(const item of list){if(!item||typeof item!=='object')continue;item.sourceIds=normalizeIds(item.sourceIds);}
+ }
+ for(const item of raw.sections||[])if(item.kind==null)item.kind='source';
+ // Coverage is a derived index, not another model-generated copy of the links.
+ const map=raw.sections||raw.sourceMap;
+ if(!Array.isArray(map)||!Array.isArray(raw.questions)||!Array.isArray(raw.omissions))return;
+ let next=1;
+ const used=new Set(raw.questions.map(q=>q.id));
+ raw.coverage=sources.map(source=>{
+  const question=raw.questions.find(q=>q.sourceIds?.includes(source.id));
+  if(question)return {sourceId:source.id,status:'pending',target:question.id};
+  const linked=map.find(m=>m.kind!=='supplement'&&m.sourceIds?.includes(source.id));
+  if(linked)return {sourceId:source.id,status:'retained',target:'整理稿來源對照'};
+  const omission=raw.omissions.find(o=>o.sourceIds?.includes(source.id));
+  if(omission)return {sourceId:source.id,status:'omitted',target:omission.id};
+  let id;do{id='Q'+String(next++).padStart(3,'0');}while(used.has(id));used.add(id);
+  raw.questions.push({id,sourceIds:[source.id],question:'這段原稿未建立整理稿對照，請確認要補入或捨去。',context:'系統發現來源尚未對應；請查看原稿後決定，不代表已保留或已捨去。'});
+  return {sourceId:source.id,status:'pending',target:id};
+ });
 }
