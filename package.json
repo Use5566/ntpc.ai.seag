@@ -3,7 +3,7 @@
   "version": "0.9.0",
   "private": true,
   "type": "module",
-  "scripts": { "start": "node server.mjs", "dev": "node dev-server.mjs", "test": "node --test core.test.mjs server.test.mjs storage.test.mjs vectorize.test.mjs chat.test.mjs knowledge.test.mjs" },
+  "scripts": { "start": "node server.mjs", "dev": "node dev-server.mjs", "test": "node --test core.test.mjs server.test.mjs storage.test.mjs vectorize.test.mjs chat.test.mjs knowledge.test.mjs review.test.mjs" },
   "engines": { "node": ">=22" }
 }
 

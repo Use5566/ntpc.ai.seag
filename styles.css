@@ -68,3 +68,11 @@ p,h1,h2,h3,label,summary,.chat-text{overflow-wrap:anywhere}
  .principles{grid-template-columns:1fr}.stats-row{gap:24px;flex-wrap:wrap}
  .final-card pre{font-size:20px}.page-footer span{max-width:none}
 }
+/* Paired review keeps source IDs internal; revision colors are intentional. */
+.comparison-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);border:1px solid #767676;margin:18px 0;background:#fff}
+.comparison-cell{padding:20px;min-width:0}.comparison-cell+ .comparison-cell{border-left:1px solid #767676;background:#fafafa}
+.comparison-cell h3{font-size:24px;margin:0 0 12px}.tracked-text{white-space:pre-wrap;overflow-wrap:anywhere;font-size:20px;line-height:1.9;border:1px solid #aaa;padding:14px}
+.tracked-text del{color:#a31313;text-decoration:line-through;background:#fff1f1}.tracked-text ins{color:#08622d;text-decoration:underline;background:#edf9ef}
+.review-consent{margin-top:20px}.layout:has(#panel-3:not([hidden])){max-width:1920px;grid-template-columns:230px minmax(0,1fr)}
+#workspace:has(#panel-3:not([hidden])){max-width:none;padding-left:24px;padding-right:24px}
+@media(max-width:900px){.comparison-row{grid-template-columns:1fr}.comparison-cell+.comparison-cell{border-left:0;border-top:1px solid #767676}.layout:has(#panel-3:not([hidden])){display:block}.comparison-cell{padding:14px}}
