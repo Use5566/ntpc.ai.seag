@@ -62,7 +62,8 @@ function normalizeOutput(raw,sources){
  const map=raw.sections||raw.sourceMap;
  if(!Array.isArray(map)||!Array.isArray(raw.questions)||!Array.isArray(raw.omissions))return;
  let next=1;
- const used=new Set(raw.questions.map(q=>q.id));
+ const used=new Set(raw.omissions.map(o=>o.id));
+ let unmatched;
  raw.coverage=sources.map(source=>{
   const question=raw.questions.find(q=>q.sourceIds?.includes(source.id));
   if(question)return {sourceId:source.id,status:'pending',target:question.id};
@@ -70,8 +71,12 @@ function normalizeOutput(raw,sources){
   if(linked)return {sourceId:source.id,status:'retained',target:'整理稿來源對照'};
   const omission=raw.omissions.find(o=>o.sourceIds?.includes(source.id));
   if(omission)return {sourceId:source.id,status:'omitted',target:omission.id};
-  let id;do{id='Q'+String(next++).padStart(3,'0');}while(used.has(id));used.add(id);
-  raw.questions.push({id,sourceIds:[source.id],question:'這段原稿未建立整理稿對照，請確認要補入或捨去。',context:'系統發現來源尚未對應；請查看原稿後決定，不代表已保留或已捨去。'});
-  return {sourceId:source.id,status:'pending',target:id};
+  if(!unmatched){
+   let id;do{id='O'+String(next++).padStart(3,'0');}while(used.has(id));used.add(id);
+   unmatched={id,sourceIds:[],text:'以下原稿未納入整理稿，合併列出供核對。',reason:'系統彙整未建立對照的原稿；不代表已判定沒有知識價值。完整內容仍保留於底稿，可恢復。'};
+   raw.omissions.push(unmatched);
+  }
+  unmatched.sourceIds.push(source.id);
+  return {sourceId:source.id,status:'omitted',target:unmatched.id};
  });
 }
